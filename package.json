@@ -1,0 +1,18 @@
+{
+  "name": "cine-studio",
+  "version": "1.0.0",
+  "description": "CineStudio · 多厂商视频生成工作台 — 文生视频 / 图生视频 / 多图视频 / 关键帧动画 + 分镜脚本",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.2.0"
+  }
+}

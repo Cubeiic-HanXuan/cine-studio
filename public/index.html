@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CineStudio · 视频生成</title>
+  <meta name="description" content="CineStudio · 多厂商视频生成工作台：文生视频、图生视频、多图视频、关键帧动画、分镜脚本。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Sora:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 氛围背景 -->
+  <div class="ambient" aria-hidden="true">
+    <div class="ambient__glow ambient__glow--a"></div>
+    <div class="ambient__glow ambient__glow--b"></div>
+    <div class="grain"></div>
+  </div>
+
+  <div class="shell">
+    <!-- ============================== 顶栏 ============================== -->
+    <header class="topbar reveal">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="13.5" stroke="currentColor" stroke-width="1.4"/>
+            <circle cx="16" cy="16" r="5.5" fill="currentColor"/>
+            <path d="M16 2.5v5M16 24.5v5M2.5 16h5M24.5 16h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="brand__text">
+          <span class="brand__name">Cine<em>Studio</em></span>
+          <span class="brand__sub">视频生成工作台</span>
+        </div>
+      </div>
+
+      <div class="topbar__meta">
+        <span class="model-badge" title="模型">agnes-video-2.5</span>
+        <button class="status" id="statusBtn" type="button" aria-haspopup="dialog">
+          <span class="status__dot" id="statusDot"></span>
+          <span class="status__label" id="statusLabel">检查密钥…</span>
+        </button>
+        <button class="btn btn--ghost" id="settingsBtn" type="button">设置</button>
+      </div>
+    </header>
+
+    <!-- 视图切换 -->
+    <nav class="views reveal" role="tablist" aria-label="视图切换">
+      <button class="view-tab is-active" data-view="single" role="tab" aria-selected="true">单镜生成</button>
+      <button class="view-tab" data-view="storyboard" role="tab" aria-selected="false">分镜脚本</button>
+    </nav>
+
+    <!-- ============================== 主体（单镜生成） ============================== -->
+    <main class="stage" id="singleView">
+      <!-- ---------- 左：创作台 ---------- -->
+      <section class="composer reveal reveal--1">
+        <!-- 模式切换 -->
+        <div class="modes" role="tablist" aria-label="生成模式">
+          <button class="mode is-active" data-mode="text" role="tab" aria-selected="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <span>文生视频</span>
+            <small>text</small>
+          </button>
+          <button class="mode" data-mode="image" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="M4.5 17l4.5-4.5 3.2 3.2 2.3-2.3 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>图生视频</span>
+            <small>keyframe</small>
+          </button>
+          <button class="mode" data-mode="multi" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="10" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="15" y="5" width="5.5" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 12h4.5" stroke="currentColor" stroke-width="1.6"/></svg>
+            <span>多图视频</span>
+            <small>reference</small>
+          </button>
+          <button class="mode" data-mode="keyframe" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 4v16M17 4v16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="7" cy="7" r="2" fill="currentColor"/><circle cx="17" cy="17" r="2" fill="currentColor"/><path d="M7 7c3 2 7 2 10 10" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 3"/></svg>
+            <span>关键帧动画</span>
+            <small>keyframe</small>
+          </button>
+        </div>
+
+        <!-- 模式说明 -->
+        <p class="mode-hint" id="modeHint"></p>
+
+        <!-- 提示词 -->
+        <div class="field">
+          <label class="field__label" for="prompt">
+            画面描述
+            <span class="field__count"><b id="promptCount">0</b></span>
+          </label>
+          <div class="prompt-wrap">
+            <textarea id="prompt" rows="5" spellcheck="false"
+              placeholder="主体与场景 · 动作与变化 · 镜头语言 · 视觉风格 · 声音与节奏"></textarea>
+            <div class="prompt-tools">
+              <div class="chips" id="chips"></div>
+              <button class="tool-btn" id="diceBtn" type="button" title="随机示例">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="4" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="9" r="1.3" fill="currentColor"/><circle cx="15" cy="9" r="1.3" fill="currentColor"/><circle cx="9" cy="15" r="1.3" fill="currentColor"/><circle cx="15" cy="15" r="1.3" fill="currentColor"/></svg>
+                灵感
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 媒体上传区 -->
+        <div class="field">
+          <label class="field__label" id="mediaLabel">素材</label>
+          <div class="media-zone" id="mediaZone">
+            <!-- 由 JS 根据模式渲染 -->
+          </div>
+        </div>
+
+        <!-- 参数区 -->
+        <div class="params">
+          <div class="param param--duration">
+            <label class="field__label" for="seconds">时长 <b id="secondsVal">5 秒</b></label>
+            <input type="range" id="seconds" min="4" max="12" step="1" value="5" />
+            <div class="range-ticks"><span>4</span><span>6</span><span>8</span><span>10</span><span>12</span></div>
+          </div>
+
+          <div class="param">
+            <label class="field__label">分辨率</label>
+            <div class="seg" id="sizeSeg" role="radiogroup">
+              <button data-size="720P" class="is-active"><b>720P</b><small>¥0.15/秒</small></button>
+              <button data-size="960P"><b>960P</b><small>¥0.25/秒</small></button>
+              <button data-size="2K"><b>2K</b><small>¥0.35/秒</small></button>
+            </div>
+          </div>
+
+          <div class="param">
+            <label class="field__label">画幅</label>
+            <div class="ratios" id="ratioList" role="radiogroup">
+              <!-- 由 JS 渲染 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 高级选项 -->
+        <details class="advanced">
+          <summary>高级选项 <span class="advanced__more">随机种子 · 可复现</span></summary>
+          <div class="advanced__body">
+            <label class="field__label" for="seed">随机种子（可选）</label>
+            <div class="seed-row">
+              <input type="number" id="seed" placeholder="留空则随机" min="0" step="1" />
+              <button class="btn btn--ghost" id="seedRandom" type="button">随机</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- 生成按钮 -->
+        <div class="actions">
+          <div class="cost" id="costLine">预估 <b>¥0.75</b> · 5 秒 720P</div>
+          <button class="btn btn--primary" id="generateBtn" type="button">
+            <span class="btn__idle">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M8 5.5v13l10-6.5-10-6.5Z" fill="currentColor"/></svg>
+              开始生成
+            </span>
+            <span class="btn__busy">正在生成…</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ---------- 右：队列与结果 ---------- -->
+      <section class="results reveal reveal--2">
+        <header class="results__head">
+          <h2>生成队列</h2>
+          <button class="link-btn" id="clearDoneBtn" type="button">清除已完成</button>
+        </header>
+        <div class="results__list" id="taskList">
+          <div class="empty" id="emptyState">
+            <div class="empty__film" aria-hidden="true">
+              <svg viewBox="0 0 64 64" fill="none"><rect x="10" y="18" width="44" height="28" rx="4" stroke="currentColor" stroke-width="1.6"/><circle cx="25" cy="31" r="3" fill="currentColor"/><path d="M14 42l10-9 6 5 8-7 12 11" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            </div>
+            <p class="empty__title">还没有任务</p>
+            <p class="empty__sub">在左侧输入描述、上传素材，点击「开始生成」</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ============================== 分镜脚本 ============================== -->
+    <section class="storyboard" id="storyboardView" hidden>
+      <div class="sb-toolbar reveal">
+        <div class="sb-toolbar__group">
+          <label class="sb-label" for="sbProjectSelect">剧本</label>
+          <select id="sbProjectSelect" class="sb-select"></select>
+          <button class="btn btn--ghost" id="sbNewProject" type="button">新建</button>
+          <button class="btn btn--ghost" id="sbRenameProject" type="button">重命名</button>
+          <button class="btn btn--ghost" id="sbDeleteProject" type="button">删除</button>
+        </div>
+
+        <div class="sb-toolbar__group">
+          <label class="sb-label" for="sbSize">分辨率</label>
+          <select id="sbSize" class="sb-select">
+            <option value="720P">720P</option>
+            <option value="960P">960P</option>
+            <option value="2K">2K</option>
+          </select>
+          <label class="sb-label" for="sbAspect">画幅</label>
+          <select id="sbAspect" class="sb-select">
+            <option value="9:16">9:16 竖屏</option>
+            <option value="16:9">16:9 横屏</option>
+            <option value="1:1">1:1 方形</option>
+            <option value="4:3">4:3</option>
+            <option value="3:4">3:4 竖版</option>
+            <option value="21:9">21:9 宽屏</option>
+          </select>
+        </div>
+
+        <div class="sb-toolbar__group sb-toolbar__group--right">
+          <button class="btn btn--ghost" id="sbExport" type="button">导出 JSON</button>
+          <button class="btn btn--ghost" id="sbImport" type="button">导入 JSON</button>
+          <input type="file" id="sbImportFile" accept="application/json,.json" hidden />
+          <button class="btn btn--ghost" id="sbAddShot" type="button">＋ 添加镜头</button>
+          <button class="btn btn--primary" id="sbBatchGenerate" type="button">
+            <span class="btn__idle"><svg viewBox="0 0 24 24" fill="none"><path d="M8 5.5v13l10-6.5-10-6.5Z" fill="currentColor"/></svg>一键批量生成</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sb-list" id="sbList">
+        <div class="empty" id="sbEmpty">
+          <div class="empty__film" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none"><rect x="10" y="12" width="44" height="40" rx="4" stroke="currentColor" stroke-width="1.6"/><path d="M18 12v40M46 12v40M22 22h20M22 30h20M22 38h20" stroke="currentColor" stroke-width="1.3"/></svg>
+          </div>
+          <p class="empty__title">还没有镜头</p>
+          <p class="empty__sub">点击「添加镜头」开始拆解你的短剧分镜</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer reveal">
+      <span>CineStudio · 多厂商视频生成工作台</span>
+      <span>任务与结果仅保存在当前浏览器</span>
+    </footer>
+  </div>
+
+  <!-- ============================== 设置弹窗 ============================== -->
+  <div class="modal" id="settingsModal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__card">
+      <button class="modal__close" data-close aria-label="关闭">✕</button>
+      <h3 id="settingsTitle">连接设置</h3>
+      <p class="modal__desc">API Key 仅保存在本机服务器（data/config.json），不会写入前端代码或发送到第三方。</p>
+
+      <label class="field__label" for="apiKey">Agnes API Key</label>
+      <div class="key-row">
+        <input type="password" id="apiKey" placeholder="sk-…" autocomplete="off" />
+        <button class="tool-btn" id="toggleKey" type="button" title="显示/隐藏">显示</button>
+      </div>
+      <p class="modal__note">从 <a href="https://agnes-ai.cn" target="_blank" rel="noreferrer">Agnes AI 平台</a> 获取。也可通过环境变量 <code>AGNES_API_KEY</code> 注入。</p>
+
+      <label class="field__label" for="baseUrl">Base URL</label>
+      <input type="text" id="baseUrl" placeholder="https://api.agnes-ai.cn/v1" />
+
+      <div class="modal__actions">
+        <button class="btn btn--ghost" id="clearKeyBtn" type="button">清除密钥</button>
+        <button class="btn btn--primary" id="saveSettingsBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast-stack" id="toastStack"></div>
+
+  <script src="app.js"></script>
+  <script src="storyboard.js"></script>
+</body>
+</html>
