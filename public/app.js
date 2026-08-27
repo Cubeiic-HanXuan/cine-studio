@@ -502,7 +502,19 @@ function renderTasks() {
     taskList.appendChild(emptyState);
     return;
   }
-  [...tasks].reverse().forEach((t) => taskList.appendChild(makeTaskCard(t)));
+  [...tasks].reverse().forEach((t) => {
+    const card = makeTaskCard(t);
+    taskList.appendChild(card);
+    // 提示词未溢出两行时，隐藏「展开」按钮
+    const prompt = card.querySelector(".task__prompt");
+    const tools = card.querySelector(".task__prompt-tools");
+    if (prompt && tools && prompt.classList.contains("is-collapsed")) {
+      if (prompt.scrollHeight <= prompt.clientHeight + 1) {
+        tools.style.display = "none";
+        prompt.title = "";
+      }
+    }
+  });
 }
 
 function makeTaskCard(task) {
@@ -521,9 +533,42 @@ function makeTaskCard(task) {
   const meta = el("div", "task__meta");
   const modeTag = el("div", "task__mode");
   modeTag.textContent = `${task.modeLabel} · ${task.seconds} 秒 · ${task.size} · ${task.ratio}`;
-  const promptLine = el("div", "task__prompt");
+
+  // 提示词：默认收缩 2 行，点「展开」显示全文并可复制
+  const promptBox = el("div", "task__prompt-box");
+  const promptLine = el("div", "task__prompt is-collapsed");
   promptLine.textContent = task.prompt || "";
-  meta.append(modeTag, promptLine);
+  promptLine.title = "点击展开 / 收起";
+
+  const promptTools = el("div", "task__prompt-tools");
+  const toggleBtn = el("button", "task__prompt-toggle");
+  toggleBtn.type = "button";
+  toggleBtn.textContent = "展开";
+  const copyBtn = el("button", "task__prompt-toggle task__prompt-copy");
+  copyBtn.type = "button";
+  copyBtn.textContent = "复制";
+  copyBtn.hidden = true;
+
+  const isCollapsed = () => promptLine.classList.contains("is-collapsed");
+  const setExpanded = (expanded) => {
+    promptLine.classList.toggle("is-collapsed", !expanded);
+    toggleBtn.textContent = expanded ? "收起" : "展开";
+    copyBtn.hidden = !expanded;
+  };
+  toggleBtn.addEventListener("click", () => setExpanded(isCollapsed()));
+  promptLine.addEventListener("click", () => setExpanded(isCollapsed()));
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(task.prompt || "");
+      toast("提示词已复制", "ok");
+    } catch {
+      toast("复制失败，请手动选择复制", "err");
+    }
+  });
+
+  promptTools.append(toggleBtn, copyBtn);
+  promptBox.append(promptLine, promptTools);
+  meta.append(modeTag, promptBox);
   top.append(thumb, meta);
   card.appendChild(top);
 
