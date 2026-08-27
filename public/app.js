@@ -113,8 +113,6 @@ const settingsBtn = $("#settingsBtn");
 const settingsModal = $("#settingsModal");
 const apiKeyInput = $("#apiKey");
 const baseUrlInput = $("#baseUrl");
-const imgurlUidInput = $("#imgurlUid");
-const imgurlTokenInput = $("#imgurlToken");
 const toastStack = $("#toastStack");
 
 // ---------------------------------------------------------------------------
@@ -871,12 +869,6 @@ async function loadSettings() {
     apiKeyInput.placeholder = data.configured
       ? "已配置 " + data.apiKeyMasked + "（留空保持不变）"
       : "sk-…";
-    imgurlUidInput.placeholder = data.imgurlConfigured
-      ? "已配置 " + data.imgurlUidMasked
-      : "UID";
-    imgurlTokenInput.placeholder = data.imgurlConfigured
-      ? "已配置 " + data.imgurlTokenMasked
-      : "API Token";
   } catch {
     applyStatus({ configured: false });
   }
@@ -911,17 +903,9 @@ $("#toggleKey").addEventListener("click", () => {
   $("#toggleKey").textContent = isPw ? "隐藏" : "显示";
 });
 
-$("#toggleImgurl").addEventListener("click", () => {
-  const isPw = imgurlTokenInput.type === "password";
-  imgurlTokenInput.type = isPw ? "text" : "password";
-  $("#toggleImgurl").textContent = isPw ? "隐藏" : "显示";
-});
-
 $("#saveSettingsBtn").addEventListener("click", async () => {
   const payload = { baseUrl: baseUrlInput.value.trim() };
   if (apiKeyInput.value.trim()) payload.apiKey = apiKeyInput.value.trim();
-  payload.imgurlUid = imgurlUidInput.value.trim();
-  payload.imgurlToken = imgurlTokenInput.value.trim();
   try {
     const res = await fetch("/api/settings", {
       method: "POST",
@@ -930,8 +914,6 @@ $("#saveSettingsBtn").addEventListener("click", async () => {
     });
     if (!res.ok) throw new Error();
     apiKeyInput.value = "";
-    imgurlUidInput.value = "";
-    imgurlTokenInput.value = "";
     toast("设置已保存", "ok");
     await loadSettings();
     closeSettings();

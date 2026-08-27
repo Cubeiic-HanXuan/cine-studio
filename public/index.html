@@ -252,14 +252,6 @@
       <label class="field__label" for="baseUrl">Base URL</label>
       <input type="text" id="baseUrl" placeholder="https://api.agnes-ai.cn/v1" />
 
-      <label class="field__label" for="imgurlUid">图片上传 · imgurl.org（可选，推荐）</label>
-      <div class="key-row">
-        <input type="text" id="imgurlUid" placeholder="UID" autocomplete="off" />
-        <input type="password" id="imgurlToken" placeholder="API Token" autocomplete="off" />
-        <button class="tool-btn" id="toggleImgurl" type="button" title="显示/隐藏">显示</button>
-      </div>
-      <p class="modal__note">填入 <a href="https://www.imgurl.org" target="_blank" rel="noreferrer">imgurl.org</a> 的 UID 与 API Token（注册后到「管理 → API 令牌」获取，国内免费），上传即走国内可访问的 imgurl.org，解决境外图床无法被 Agnes 访问的问题。两者都留空则清除。</p>
-
       <div class="modal__actions">
         <button class="btn btn--ghost" id="clearKeyBtn" type="button">清除密钥</button>
         <button class="btn btn--primary" id="saveSettingsBtn" type="button">保存</button>
