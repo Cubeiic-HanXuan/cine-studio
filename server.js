@@ -46,6 +46,10 @@ function getBaseUrl() {
   return process.env.AGNES_BASE_URL || readConfig().baseUrl || DEFAULT_BASE_URL;
 }
 
+function getSmmsToken() {
+  return process.env.SMMS_TOKEN || readConfig().smmsToken || "";
+}
+
 // 查询接口不在 /v1 下：https://api.agnes-ai.cn/agnesapi
 function getQueryOrigin() {
   return getBaseUrl().replace(/\/v1\/?$/, "");
@@ -155,11 +159,32 @@ async function uploadToZeroX(file) {
   return text;
 }
 
+// sm.ms：国内可访问的图床，需用户提供免费 API Token（https://sm.ms → Dashboard → API Token）
+async function uploadToSmms(file, token) {
+  const form = new FormData();
+  form.append("smfile", fileBlob(file), safeName(file.originalname));
+  const res = await fetch("https://sm.ms/api/v2/upload", {
+    method: "POST",
+    headers: { "User-Agent": UA, Authorization: token },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  const url = data?.data?.url;
+  if (!res.ok || !data?.success || !/^https?:\/\//.test(url || "")) {
+    throw new Error(`sm.ms 上传失败: ${data?.message || JSON.stringify(data).slice(0, 120)}`);
+  }
+  return url;
+}
+
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "未收到文件" });
   }
-  const providers = [uploadToUguu, uploadToLitterbox, uploadToCatbox, uploadToZeroX];
+  // 优先使用用户配置的 sm.ms（国内可访问），其次再退回境外公共图床
+  const providers = [];
+  const smmsToken = getSmmsToken();
+  if (smmsToken) providers.push((file) => uploadToSmms(file, smmsToken));
+  providers.push(uploadToUguu, uploadToLitterbox, uploadToCatbox, uploadToZeroX);
   for (const fn of providers) {
     try {
       const url = await fn(req.file);
@@ -174,7 +199,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
   }
   res.status(502).json({
-    error: "上传转存失败：所有公共图床当前均不可用，可稍后重试，或在「图片链接」输入框粘贴一张已公开可访问的 URL。",
+    error: "上传转存失败：所有图床当前均不可用。可稍后重试，或在「图片链接」输入框粘贴一张已公开可访问的 URL。",
   });
 });
 
@@ -183,11 +208,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 // ---------------------------------------------------------------------------
 app.get("/api/settings", (_req, res) => {
   const key = getApiKey();
+  const smmsToken = getSmmsToken();
   res.json({
     configured: !!key,
     apiKeyMasked: maskKey(key),
     baseUrl: getBaseUrl(),
     model: MODEL,
+    smmsConfigured: !!smmsToken,
+    smmsTokenMasked: maskKey(smmsToken),
   });
 });
 
@@ -198,6 +226,11 @@ app.post("/api/settings", (req, res) => {
   }
   if (typeof req.body.baseUrl === "string" && req.body.baseUrl.trim()) {
     cfg.baseUrl = req.body.baseUrl.replace(/\/+$/, "");
+  }
+  if (typeof req.body.smmsToken === "string") {
+    const t = req.body.smmsToken.trim();
+    if (t) cfg.smmsToken = t;
+    else delete cfg.smmsToken; // 留空即清除
   }
   writeConfig(cfg);
   res.json({ ok: true });

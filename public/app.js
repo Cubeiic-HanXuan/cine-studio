@@ -113,6 +113,7 @@ const settingsBtn = $("#settingsBtn");
 const settingsModal = $("#settingsModal");
 const apiKeyInput = $("#apiKey");
 const baseUrlInput = $("#baseUrl");
+const smmsTokenInput = $("#smmsToken");
 const toastStack = $("#toastStack");
 
 // ---------------------------------------------------------------------------
@@ -869,6 +870,9 @@ async function loadSettings() {
     apiKeyInput.placeholder = data.configured
       ? "已配置 " + data.apiKeyMasked + "（留空保持不变）"
       : "sk-…";
+    smmsTokenInput.placeholder = data.smmsConfigured
+      ? "已配置 " + data.smmsTokenMasked + "（留空保持不变，清空可移除）"
+      : "sm.ms API Token（留空则用公共图床）";
   } catch {
     applyStatus({ configured: false });
   }
@@ -903,9 +907,16 @@ $("#toggleKey").addEventListener("click", () => {
   $("#toggleKey").textContent = isPw ? "隐藏" : "显示";
 });
 
+$("#toggleSmms").addEventListener("click", () => {
+  const isPw = smmsTokenInput.type === "password";
+  smmsTokenInput.type = isPw ? "text" : "password";
+  $("#toggleSmms").textContent = isPw ? "隐藏" : "显示";
+});
+
 $("#saveSettingsBtn").addEventListener("click", async () => {
   const payload = { baseUrl: baseUrlInput.value.trim() };
   if (apiKeyInput.value.trim()) payload.apiKey = apiKeyInput.value.trim();
+  payload.smmsToken = smmsTokenInput.value.trim(); // 留空即清除
   try {
     const res = await fetch("/api/settings", {
       method: "POST",
@@ -914,6 +925,7 @@ $("#saveSettingsBtn").addEventListener("click", async () => {
     });
     if (!res.ok) throw new Error();
     apiKeyInput.value = "";
+    smmsTokenInput.value = "";
     toast("设置已保存", "ok");
     await loadSettings();
     closeSettings();

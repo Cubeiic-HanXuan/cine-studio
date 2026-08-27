@@ -252,6 +252,13 @@
       <label class="field__label" for="baseUrl">Base URL</label>
       <input type="text" id="baseUrl" placeholder="https://api.agnes-ai.cn/v1" />
 
+      <label class="field__label" for="smmsToken">图片上传 Token（可选，推荐）</label>
+      <div class="key-row">
+        <input type="password" id="smmsToken" placeholder="sm.ms API Token（留空则用公共图床）" autocomplete="off" />
+        <button class="tool-btn" id="toggleSmms" type="button" title="显示/隐藏">显示</button>
+      </div>
+      <p class="modal__note">填入 sm.ms 的 API Token 后，上传的图片会传到国内可访问的 <a href="https://sm.ms" target="_blank" rel="noreferrer">sm.ms</a>，解决境外图床无法被 Agnes 访问的问题。注册后到「Dashboard → API Token」获取。留空则清除。</p>
+
       <div class="modal__actions">
         <button class="btn btn--ghost" id="clearKeyBtn" type="button">清除密钥</button>
         <button class="btn btn--primary" id="saveSettingsBtn" type="button">保存</button>
