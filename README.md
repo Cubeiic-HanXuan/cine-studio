@@ -29,9 +29,9 @@ Agnes 的 API Key **不应写入前端代码**，且浏览器直连 API 会遇�
 
 1. 托管页面；
 2. 保管 API Key（仅存于本机 `data/config.json` 或环境变量），代发创建 / 查询请求；
-3. 把上传的图片自动转存到图床，拿到 Agnes 所需的公开 URL。**推荐在「设置」里配置 sm.ms Token**（国内可访问）；未配置时依次回退 `uguu.se` → `litterbox.catbox.moe` → `catbox.moe` → `0x0.st`。
+3. 把上传的图片自动转存到图床，拿到 Agnes 所需的公开 URL。**推荐在「设置」里配置 imgurl.org 的 UID + Token**（国内可访问）；未配置时依次回退 `uguu.se` → `litterbox.catbox.moe` → `catbox.moe` → `0x0.st`。
 
-> 由于 Agnes 服务器在国内，境外图床（uguu / litterbox 等）可能无法被其访问而报 `media URL could not be downloaded`。**建议注册 sm.ms（免费）拿到 API Token 填入「设置」**，上传即走国内可访问的 sm.ms；也可直接粘贴自己准备的国内直链（对象存储 / 图床）。
+> 由于 Agnes 服务器在国内，境外图床（uguu / litterbox 等）可能无法被其访问而报 `media URL could not be downloaded`。**建议注册 imgurl.org（免费）获取 UID + API Token 填入「设置」**，上传即走国内可访问的 imgurl.org；也可直接粘贴自己准备的国内直链（对象存储 / 图床）。
 
 ## 快速开始
 

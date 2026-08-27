@@ -46,8 +46,12 @@ function getBaseUrl() {
   return process.env.AGNES_BASE_URL || readConfig().baseUrl || DEFAULT_BASE_URL;
 }
 
-function getSmmsToken() {
-  return process.env.SMMS_TOKEN || readConfig().smmsToken || "";
+function getImgurlUid() {
+  return process.env.IMGURL_UID || readConfig().imgurlUid || "";
+}
+
+function getImgurlToken() {
+  return process.env.IMGURL_TOKEN || readConfig().imgurlToken || "";
 }
 
 // 查询接口不在 /v1 下：https://api.agnes-ai.cn/agnesapi
@@ -159,19 +163,22 @@ async function uploadToZeroX(file) {
   return text;
 }
 
-// sm.ms：国内可访问的图床，需用户提供免费 API Token（https://sm.ms → Dashboard → API Token）
-async function uploadToSmms(file, token) {
+// imgurl.org：国内可访问的免费图床。公开接口 POST /api/v2/upload，鉴权用表单字段 uid + token
+// （从 https://www.imgurl.org 后台「管理 - API 令牌」获取 UID 与 Token）
+async function uploadToImgurl(file, uid, token) {
   const form = new FormData();
-  form.append("smfile", fileBlob(file), safeName(file.originalname));
-  const res = await fetch("https://sm.ms/api/v2/upload", {
+  form.append("uid", uid);
+  form.append("token", token);
+  form.append("file", fileBlob(file), safeName(file.originalname));
+  const res = await fetch("https://www.imgurl.org/api/v2/upload", {
     method: "POST",
-    headers: { "User-Agent": UA, Authorization: token },
+    headers: { "User-Agent": UA },
     body: form,
   });
   const data = await res.json().catch(() => ({}));
   const url = data?.data?.url;
-  if (!res.ok || !data?.success || !/^https?:\/\//.test(url || "")) {
-    throw new Error(`sm.ms 上传失败: ${data?.message || JSON.stringify(data).slice(0, 120)}`);
+  if (!res.ok || data?.code !== 200 || !/^https?:\/\//.test(url || "")) {
+    throw new Error(`imgurl.org 上传失败: ${data?.msg || JSON.stringify(data).slice(0, 120)}`);
   }
   return url;
 }
@@ -180,10 +187,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "未收到文件" });
   }
-  // 优先使用用户配置的 sm.ms（国内可访问），其次再退回境外公共图床
+  // 优先使用用户配置的 imgurl.org（国内可访问），其次再退回境外公共图床
   const providers = [];
-  const smmsToken = getSmmsToken();
-  if (smmsToken) providers.push((file) => uploadToSmms(file, smmsToken));
+  const imgurlUid = getImgurlUid();
+  const imgurlToken = getImgurlToken();
+  if (imgurlUid && imgurlToken) providers.push((file) => uploadToImgurl(file, imgurlUid, imgurlToken));
   providers.push(uploadToUguu, uploadToLitterbox, uploadToCatbox, uploadToZeroX);
   for (const fn of providers) {
     try {
@@ -208,14 +216,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 // ---------------------------------------------------------------------------
 app.get("/api/settings", (_req, res) => {
   const key = getApiKey();
-  const smmsToken = getSmmsToken();
+  const uid = getImgurlUid();
+  const token = getImgurlToken();
   res.json({
     configured: !!key,
     apiKeyMasked: maskKey(key),
     baseUrl: getBaseUrl(),
     model: MODEL,
-    smmsConfigured: !!smmsToken,
-    smmsTokenMasked: maskKey(smmsToken),
+    imgurlConfigured: !!(uid && token),
+    imgurlUidMasked: maskKey(uid),
+    imgurlTokenMasked: maskKey(token),
   });
 });
 
@@ -227,10 +237,15 @@ app.post("/api/settings", (req, res) => {
   if (typeof req.body.baseUrl === "string" && req.body.baseUrl.trim()) {
     cfg.baseUrl = req.body.baseUrl.replace(/\/+$/, "");
   }
-  if (typeof req.body.smmsToken === "string") {
-    const t = req.body.smmsToken.trim();
-    if (t) cfg.smmsToken = t;
-    else delete cfg.smmsToken; // 留空即清除
+  if (typeof req.body.imgurlUid === "string") {
+    const u = req.body.imgurlUid.trim();
+    if (u) cfg.imgurlUid = u;
+    else delete cfg.imgurlUid; // 留空即清除
+  }
+  if (typeof req.body.imgurlToken === "string") {
+    const t = req.body.imgurlToken.trim();
+    if (t) cfg.imgurlToken = t;
+    else delete cfg.imgurlToken; // 留空即清除
   }
   writeConfig(cfg);
   res.json({ ok: true });
