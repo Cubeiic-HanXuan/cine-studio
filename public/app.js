@@ -431,6 +431,7 @@ async function addFile(target, file) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "上传失败");
     item.url = data.url;
+    item.localUrl = data.localUrl || null; // 参考图本地落盘地址（图床过期也不丢）
     item.status = "ready";
   } catch (err) {
     item.status = "error";
@@ -479,6 +480,7 @@ function saveTasks() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
   } catch {}
+  if (window.CineStore) CineStore.persist("tasks");
 }
 
 function loadTasks() {
@@ -507,6 +509,7 @@ function readLibrary() {
 
 function writeLibrary(list) {
   try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(list)); } catch {}
+  if (window.CineStore) CineStore.persist("library");
 }
 
 function addToLibrary(record) {
@@ -826,7 +829,7 @@ function collectRequest() {
 
 function firstThumb() {
   const it = media.image[0] || media.kfFirst || media.kfLast || media.multi[0];
-  return it ? it.url || it.preview : null;
+  return it ? it.localUrl || it.url || it.preview : null;
 }
 
 async function createTask(requestBody, retryOf) {

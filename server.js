@@ -10,6 +10,7 @@ import express from "express";
 import multer from "multer";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8787;
 const DATA_DIR = path.join(__dirname, "data");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
+// 业务数据持久化：生成队列 / 分镜脚本 / 已生成视频库
+const STORE_FILE = path.join(DATA_DIR, "store.json");
+// 参考图本地落盘目录（图床 URL 会过期，二进制存这里才能永久保留）
+const ASSETS_DIR = path.join(DATA_DIR, "assets");
 
 const DEFAULT_BASE_URL = "https://api.agnes-ai.cn/v1";
 const MODEL = "agnes-video-2.5";
@@ -36,6 +41,32 @@ function readConfig() {
 function writeConfig(cfg) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
+}
+
+// ---------------------------------------------------------------------------
+// 业务数据持久化（store.json）：生成队列 / 分镜脚本 / 已生成视频库
+// 浏览器只做展示缓存，真正的持久化在服务端磁盘。
+// ---------------------------------------------------------------------------
+function emptyStore() {
+  return { tasks: [], projects: [], library: [] };
+}
+
+function readStore() {
+  try {
+    const raw = fs.readFileSync(STORE_FILE, "utf8");
+    const data = JSON.parse(raw);
+    return { ...emptyStore(), ...data };
+  } catch {
+    return emptyStore();
+  }
+}
+
+// 原子写：先写临时文件再 rename，避免中途断电/崩溃损坏数据
+function writeStore(store) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const tmp = STORE_FILE + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(store), "utf8");
+  fs.renameSync(tmp, STORE_FILE);
 }
 
 function getApiKey() {
@@ -73,6 +104,9 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/videos", (req, res, next) => {
   express.static(getVideoDir())(req, res, next);
 });
+
+// 参考图本地库：上传时落盘到 data/assets/，以 /assets 暴露（图床过期也不丢）
+app.use("/assets", express.static(ASSETS_DIR));
 
 // 上传：内存接收，最大 500MB
 const upload = multer({
@@ -169,12 +203,26 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "未收到文件" });
   }
+
+  // 参考图先落盘到本地（图床 URL 会过期，本地文件才能永久保留用于展示）
+  let localUrl = null;
+  try {
+    fs.mkdirSync(ASSETS_DIR, { recursive: true });
+    const ext = path.extname(safeName(req.file.originalname)) || ".bin";
+    const filename = crypto.randomUUID() + ext;
+    fs.writeFileSync(path.join(ASSETS_DIR, filename), req.file.buffer);
+    localUrl = "/assets/" + filename;
+  } catch (err) {
+    console.error("[upload local]", err.message);
+  }
+
   const providers = [uploadToUguu, uploadToLitterbox, uploadToCatbox, uploadToZeroX];
   for (const fn of providers) {
     try {
       const url = await fn(req.file);
       return res.json({
         url,
+        localUrl,
         name: req.file.originalname,
         type: req.file.mimetype,
         size: req.file.size,
@@ -224,6 +272,30 @@ app.post("/api/settings/clear", (_req, res) => {
   delete cfg.apiKey;
   writeConfig(cfg);
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// 业务数据持久化：生成队列 / 分镜脚本 / 已生成视频库
+//   GET  /api/state  → { exists, tasks, projects, library }（exists 用于一次性迁移判断）
+//   POST /api/state  → body { tasks?, projects?, library? }，只替换传入的键
+// ---------------------------------------------------------------------------
+app.get("/api/state", (_req, res) => {
+  res.json({ exists: fs.existsSync(STORE_FILE), ...readStore() });
+});
+
+app.post("/api/state", (req, res) => {
+  const body = req.body || {};
+  const store = readStore();
+  for (const key of ["tasks", "projects", "library"]) {
+    if (Array.isArray(body[key])) store[key] = body[key];
+  }
+  try {
+    writeStore(store);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[state]", err.message);
+    res.status(500).json({ error: "保存失败：" + err.message });
+  }
 });
 
 // ---------------------------------------------------------------------------

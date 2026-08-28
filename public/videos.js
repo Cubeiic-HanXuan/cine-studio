@@ -77,7 +77,7 @@ function backfillLibrary() {
             ratio: p.aspect_ratio || "9:16",
             modeLabel: s.mode === "image" ? "图生视频" : "文生视频",
             createdAt: s.task.createdAt || p.updatedAt || 0,
-            thumb: (s.refImage && s.refImage.url) || null,
+            thumb: (s.refImage && (s.refImage.localUrl || s.refImage.url)) || null,
           });
         }
       });

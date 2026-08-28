@@ -285,8 +285,7 @@
   <!-- Toast -->
   <div class="toast-stack" id="toastStack"></div>
 
-  <script src="app.js"></script>
-  <script src="storyboard.js"></script>
-  <script src="videos.js"></script>
+  <!-- 先加载 store.js：从服务端拉取/迁移持久化数据后，再由它按序加载业务脚本 -->
+  <script src="store.js"></script>
 </body>
 </html>

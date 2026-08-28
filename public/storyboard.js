@@ -54,6 +54,7 @@ function loadProjects() {
 
 function saveProjects() {
   try { localStorage.setItem(SB_KEY, JSON.stringify(projects)); } catch {}
+  if (window.CineStore) CineStore.persist("projects");
 }
 
 function currentProject() {
@@ -89,7 +90,9 @@ function normalizeShot(s) {
     dialogue: s.dialogue || "",
     seconds: s.seconds || 5,
     mode: s.mode === "image" ? "image" : "text",
-    refImage: s.refImage && s.refImage.url ? { url: s.refImage.url, name: s.refImage.name || "" } : null,
+    refImage: s.refImage && s.refImage.url
+      ? { url: s.refImage.url, localUrl: s.refImage.localUrl || null, name: s.refImage.name || "" }
+      : null,
     note: s.note || "",
     task: s.task && s.task.videoId ? { ...s.task, pollerActive: false } : null,
   };
@@ -388,7 +391,7 @@ refInput.addEventListener("change", async () => {
     const res = await fetch("/api/upload", { method: "POST", body: form });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "上传失败");
-    target.refImage = { url: data.url, name: data.name, uploading: false };
+    target.refImage = { url: data.url, localUrl: data.localUrl || null, name: data.name, uploading: false };
   } catch (err) {
     target.refImage = null;
     toast("参考图上传失败：" + err.message, "err", 5000);
@@ -415,7 +418,7 @@ function renderShotMedia(shot, mediaEl) {
   if (shot.refImage?.url) {
     const thumb = el("div", "shot-media-thumb" + (shot.refImage.uploading ? " is-uploading" : ""));
     const img = el("img");
-    img.src = shot.refImage.url;
+    img.src = shot.refImage.localUrl || shot.refImage.url;
     img.alt = shot.refImage.name || "";
     thumb.appendChild(img);
     const x = el("button", "thumb__x");
@@ -474,7 +477,8 @@ function renderShotResult(shot, resultEl) {
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
-    if (shot.refImage?.url && !shot.refImage.uploading) video.poster = shot.refImage.url;
+    if (shot.refImage?.url && !shot.refImage.uploading)
+      video.poster = shot.refImage.localUrl || shot.refImage.url;
     video.style.aspectRatio = ((currentProject()?.aspect_ratio || "9:16")).replace(":", " / ");
     wrap.appendChild(video);
     resultEl.appendChild(wrap);
@@ -648,7 +652,7 @@ function shotToLibraryRecord(shot, proj) {
     ratio: proj ? proj.aspect_ratio : "9:16",
     modeLabel: shot.mode === "image" ? "图生视频" : "文生视频",
     createdAt: t.createdAt || (proj && proj.updatedAt) || Date.now(),
-    thumb: (shot.refImage && shot.refImage.url) || null,
+    thumb: (shot.refImage && (shot.refImage.localUrl || shot.refImage.url)) || null,
   };
 }
 
@@ -673,7 +677,7 @@ async function archiveShot(shot) {
             size: proj.size,
             ratio: proj.aspect_ratio,
             createdAt: t.createdAt || proj.updatedAt || Date.now(),
-            thumb: (shot.refImage && shot.refImage.url) || null,
+            thumb: (shot.refImage && (shot.refImage.localUrl || shot.refImage.url)) || null,
           },
         ],
       }),
