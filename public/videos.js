@@ -23,18 +23,22 @@ const videosExportCsv = document.getElementById("videosExportCsv");
 const FILM_SVG = `<svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="M4.5 17l4.5-4.5 3.2 3.2 2.3-2.3 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 // ---------------------------------------------------------------------------
-// 聚合已完成视频
+// 聚合已完成视频（读独立的视频库；先从队列/项目回填一次，确保旧数据迁移）
 // ---------------------------------------------------------------------------
 function collectRecords() {
-  const records = [];
+  backfillLibrary();
+  return readLibrary();
+}
 
-  // 1) 单镜生成
+// 把「单镜生成」队列和「分镜脚本」项目里的已完成视频回填进独立视频库
+function backfillLibrary() {
   try {
     const tasks = JSON.parse(localStorage.getItem(TASKS_KEY) || "[]");
     (Array.isArray(tasks) ? tasks : []).forEach((t) => {
       if (t && t.status === "completed" && t.url) {
-        records.push({
+        addToLibrary({
           id: t.id,
+          videoId: t.videoId || t.id || "",
           group: "单镜生成",
           shotNo: null,
           scene: "",
@@ -47,21 +51,20 @@ function collectRecords() {
           ratio: t.ratio,
           modeLabel: t.modeLabel || "文生视频",
           createdAt: t.createdAt || 0,
-          videoId: t.videoId || t.id || "",
           thumb: t.thumb || null,
         });
       }
     });
   } catch {}
 
-  // 2) 分镜脚本
   try {
     const projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
     (Array.isArray(projects) ? projects : []).forEach((p) => {
       (Array.isArray(p.shots) ? p.shots : []).forEach((s, i) => {
         if (s && s.task && s.task.status === "completed" && s.task.url) {
-          records.push({
+          addToLibrary({
             id: s.id,
+            videoId: s.task.videoId || s.id || "",
             group: p.name || "未命名剧本",
             shotNo: i + 1,
             scene: s.scene || "",
@@ -74,15 +77,12 @@ function collectRecords() {
             ratio: p.aspect_ratio || "9:16",
             modeLabel: s.mode === "image" ? "图生视频" : "文生视频",
             createdAt: s.task.createdAt || p.updatedAt || 0,
-            videoId: s.task.videoId || s.id || "",
             thumb: (s.refImage && s.refImage.url) || null,
           });
         }
       });
     });
   } catch {}
-
-  return records;
 }
 
 function sortRecords(records) {
@@ -297,11 +297,22 @@ videosDownloadAll.addEventListener("click", async () => {
   }
 });
 
-// 把 /api/archive 返回的本地映射写回 localStorage（单镜任务 + 分镜镜头）
+// 把 /api/archive 返回的本地映射写回（视频库 + 单镜任务 + 分镜镜头）
 function applyLocalMapping(savedList) {
   if (!savedList || !savedList.length) return;
   const byUrl = new Map(savedList.map((s) => [s.url, s.localUrl]));
   const byId = new Map(savedList.map((s) => [s.videoId, s.localUrl]));
+
+  // 1) 视频库（主来源）
+  try {
+    const lib = readLibrary();
+    let libChanged = false;
+    lib.forEach((r) => {
+      const lu = (r.videoId && byId.get(r.videoId)) || byUrl.get(r.url);
+      if (lu && r.localUrl !== lu) { r.localUrl = lu; libChanged = true; }
+    });
+    if (libChanged) writeLibrary(lib);
+  } catch {}
 
   try {
     const tasks = JSON.parse(localStorage.getItem(TASKS_KEY) || "[]");
@@ -370,3 +381,7 @@ videosSortBtn.addEventListener("click", () => {
   videosSortBtn.textContent = videosNewestFirst ? "最新在前" : "最早在前";
   renderVideos();
 });
+
+// 页面加载即回填一次，把既有「队列/项目」里的已完成视频迁移进独立视频库，
+// 避免用户在打开本视图之前先清空队列导致旧数据丢失。
+backfillLibrary();

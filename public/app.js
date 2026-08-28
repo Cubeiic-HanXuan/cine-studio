@@ -491,6 +491,61 @@ function loadTasks() {
   tasks.forEach((t) => { t.pollerActive = false; });
 }
 
+// ---------------------------------------------------------------------------
+// 视频库：独立于「生成队列」的已完成视频记录，清除队列不影响它
+// ---------------------------------------------------------------------------
+const LIBRARY_KEY = "agnes.studio.library.v1";
+
+function readLibrary() {
+  try {
+    const l = JSON.parse(localStorage.getItem(LIBRARY_KEY) || "[]");
+    return Array.isArray(l) ? l : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLibrary(list) {
+  try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(list)); } catch {}
+}
+
+function addToLibrary(record) {
+  if (!record || (!record.url && !record.videoId)) return;
+  const list = readLibrary();
+  const i = list.findIndex(
+    (x) => (record.videoId && x.videoId === record.videoId) || (record.url && x.url === record.url)
+  );
+  let changed = false;
+  if (i >= 0) {
+    const merged = { ...list[i], ...record };
+    if (JSON.stringify(merged) !== JSON.stringify(list[i])) { list[i] = merged; changed = true; }
+  } else {
+    list.unshift(record);
+    changed = true;
+  }
+  if (changed) writeLibrary(list);
+}
+
+function taskToLibraryRecord(task) {
+  return {
+    id: task.id,
+    videoId: task.videoId,
+    group: "单镜生成",
+    shotNo: null,
+    scene: "",
+    prompt: task.prompt || "",
+    url: task.url,
+    localUrl: task.localUrl || null,
+    localFile: task.localFile || null,
+    seconds: task.seconds,
+    size: task.size,
+    ratio: task.ratio,
+    modeLabel: task.modeLabel || "文生视频",
+    createdAt: task.createdAt || 0,
+    thumb: task.thumb || null,
+  };
+}
+
 function resumePolling() {
   tasks.forEach((t) => {
     if (["queued", "in_progress"].includes(t.status) && !t.pollerActive) poll(t);
@@ -874,8 +929,11 @@ async function poll(task) {
     await sleep(POLL_MS);
   }
   task.pollerActive = false;
-  // 完成后自动把视频下载到本地存储目录（此后播放走本地文件，不再依赖远程地址）
-  if (task.status === "completed" && task.url) archiveTask(task);
+  // 完成后：先记入视频库（与生成队列解耦），再自动下载到本地存储目录
+  if (task.status === "completed" && task.url) {
+    addToLibrary(taskToLibraryRecord(task));
+    archiveTask(task);
+  }
 }
 
 // 下载单个任务视频到本地存储目录，并记录 localUrl / localFile
@@ -907,6 +965,7 @@ async function archiveTask(task) {
       task.localFile = data.saved[0].file;
       saveTasks();
       updateTask(task);
+      addToLibrary(taskToLibraryRecord(task)); // 同步本地化结果到视频库
     }
   } catch (e) {
     // 落盘失败不影响使用（仍可回退到远程地址）
@@ -926,7 +985,11 @@ async function refreshTask(task) {
       task.error = data.error?.message || data.error || null;
       saveTasks();
       updateTask(task);
-      if (task.status === "completed" && task.url) toast("已获取到视频", "ok", 1600);
+      if (task.status === "completed" && task.url) {
+        addToLibrary(taskToLibraryRecord(task));
+        if (!task.localUrl) archiveTask(task);
+        toast("已获取到视频", "ok", 1600);
+      }
       else if (task.status === "completed") toast("任务已完成，但暂未返回视频地址", "info", 2600);
       else toast("状态已刷新", "ok", 1600);
     } else {

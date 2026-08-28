@@ -624,8 +624,32 @@ async function pollShot(shot) {
     await sleep(POLL_SB_MS);
   }
   t.pollerActive = false;
-  // 完成后自动下载到本地存储目录
-  if (t.status === "completed" && t.url) archiveShot(shot);
+  // 完成后：记入视频库（与项目数据解耦）+ 自动下载到本地
+  if (t.status === "completed" && t.url) {
+    addToLibrary(shotToLibraryRecord(shot, currentProject()));
+    archiveShot(shot);
+  }
+}
+
+function shotToLibraryRecord(shot, proj) {
+  const t = shot.task;
+  return {
+    id: shot.id,
+    videoId: t.videoId,
+    group: (proj && proj.name) || "未命名剧本",
+    shotNo: proj ? proj.shots.indexOf(shot) + 1 : null,
+    scene: shot.scene || "",
+    prompt: shot.description || "",
+    url: t.url,
+    localUrl: t.localUrl || null,
+    localFile: t.localFile || null,
+    seconds: shot.seconds,
+    size: proj ? proj.size : "720P",
+    ratio: proj ? proj.aspect_ratio : "9:16",
+    modeLabel: shot.mode === "image" ? "图生视频" : "文生视频",
+    createdAt: t.createdAt || (proj && proj.updatedAt) || Date.now(),
+    thumb: (shot.refImage && shot.refImage.url) || null,
+  };
 }
 
 async function archiveShot(shot) {
@@ -659,6 +683,7 @@ async function archiveShot(shot) {
       t.localFile = data.saved[0].file;
       persist();
       renderShotResult(shot, shotEl(shot, ".shot-result"));
+      addToLibrary(shotToLibraryRecord(shot, proj)); // 同步本地化结果到视频库
     }
   } catch (e) {
     console.warn("[archive]", e.message);
