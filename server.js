@@ -443,6 +443,64 @@ app.post("/api/archive", async (req, res) => {
   res.json({ ok: true, saved, skipped, total: records.length, dir: baseDir });
 });
 
+// ---------------------------------------------------------------------------
+// 扫描本地存储目录，返回磁盘上已有的视频（用于恢复：即使浏览器数据被清，
+// 已下载到磁盘的视频也能在「已生成视频」里找回来）
+// ---------------------------------------------------------------------------
+const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov", ".m4v", ".mkv"]);
+
+app.get("/api/library", (_req, res) => {
+  const baseDir = getVideoDir();
+  const records = [];
+  try {
+    const groups = fs.readdirSync(baseDir, { withFileTypes: true });
+    for (const g of groups) {
+      if (!g.isDirectory()) continue;
+      const groupDir = path.join(baseDir, g.name);
+      const files = fs.readdirSync(groupDir);
+      for (const f of files) {
+        const ext = path.extname(f).toLowerCase();
+        if (!VIDEO_EXTS.has(ext)) continue;
+        try {
+          const full = path.join(groupDir, f);
+          const st = fs.statSync(full);
+          const rel = (g.name + "/" + f);
+          // 文件名格式：<镜头号>_<label>_<videoId后缀>.<ext>
+          const base = f.slice(0, -ext.length);
+          const parts = base.split("_");
+          const shotRaw = parts[0];
+          const shotNo = /^\d+$/.test(shotRaw) ? parseInt(shotRaw, 10) : null;
+          const suffix = parts.length >= 3 ? parts[parts.length - 1] : "";
+          const label = parts.slice(1, -1).join("_");
+          records.push({
+            id: "disk_" + suffix + "_" + shotNo,
+            videoId: suffix ? "disk_" + suffix : "",
+            group: g.name,
+            shotNo: shotNo === 0 ? null : shotNo,
+            scene: "",
+            prompt: label || "",
+            url: "",
+            localUrl: "/videos/" + rel,
+            localFile: rel,
+            seconds: "",
+            size: "",
+            ratio: "",
+            modeLabel: "",
+            createdAt: st.mtimeMs,
+            thumb: null,
+            bytes: st.size,
+            fromDisk: true,
+          });
+        } catch {}
+      }
+    }
+  } catch {
+    // 目录不存在等情况，返回空
+  }
+  records.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  res.json({ records });
+});
+
 app.listen(PORT, () => {
   const key = getApiKey();
   console.log("");

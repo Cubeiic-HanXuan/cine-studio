@@ -182,9 +182,15 @@ function makeVideoCard(r) {
   promptBox.append(promptLine, promptTools);
   info.appendChild(promptBox);
 
-  // 元信息
+  // 元信息（缺失字段时优雅降级，例如从磁盘恢复的视频可能没有元数据）
   const meta = el("div", "video-card__meta");
-  meta.textContent = `${r.modeLabel} · ${r.seconds || 5} 秒 · ${r.size || "720P"} · ${r.ratio || "16:9"}`;
+  const metaParts = [];
+  if (r.modeLabel) metaParts.push(r.modeLabel);
+  if (r.seconds) metaParts.push(`${r.seconds} 秒`);
+  if (r.size) metaParts.push(r.size);
+  if (r.ratio) metaParts.push(r.ratio);
+  if (!metaParts.length) metaParts.push("本地视频");
+  meta.textContent = metaParts.join(" · ");
   info.appendChild(meta);
 
   // 操作
@@ -225,8 +231,34 @@ function makeVideoCard(r) {
 
 // ---------------------------------------------------------------------------
 // 渲染
+// 扫描本地存储目录，把磁盘上已有的视频合并进视频库（恢复被清掉的记录）
+async function syncDiskLibrary() {
+  try {
+    const res = await fetch("/api/library");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !Array.isArray(data.records) || !data.records.length) return;
+    const lib = readLibrary();
+    let changed = false;
+    data.records.forEach((dr) => {
+      const i = lib.findIndex((x) => x.localFile && x.localFile === dr.localFile);
+      if (i >= 0) {
+        // 已有记录：补充本地地址
+        if (!lib[i].localUrl || !lib[i].localFile) {
+          lib[i] = { ...lib[i], localUrl: dr.localUrl, localFile: dr.localFile };
+          changed = true;
+        }
+      } else {
+        lib.unshift(dr);
+        changed = true;
+      }
+    });
+    if (changed) writeLibrary(lib);
+  } catch {}
+}
+
 // ---------------------------------------------------------------------------
-function renderVideos() {
+async function renderVideos() {
+  await syncDiskLibrary();
   const records = collectRecords();
   videosCount.textContent = records.length ? `共 ${records.length} 个视频` : "";
   videosList.innerHTML = "";
@@ -382,6 +414,8 @@ videosSortBtn.addEventListener("click", () => {
   renderVideos();
 });
 
-// 页面加载即回填一次，把既有「队列/项目」里的已完成视频迁移进独立视频库，
-// 避免用户在打开本视图之前先清空队列导致旧数据丢失。
-backfillLibrary();
+// 页面加载：先扫描磁盘恢复视频库，再回填既有「队列/项目」里的已完成视频。
+(async function initVideos() {
+  await syncDiskLibrary();
+  backfillLibrary();
+})();
