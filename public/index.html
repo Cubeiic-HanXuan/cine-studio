@@ -7,7 +7,7 @@
   <meta name="description" content="CineStudio · 多厂商视频生成工作台：文生视频、图生视频、多图视频、关键帧动画、分镜脚本。" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Sora:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -36,7 +36,16 @@
       </div>
 
       <div class="topbar__meta">
-        <span class="model-badge" title="模型">agnes-video-2.5</span>
+        <div class="model-switch" id="modelSwitch">
+          <button class="model-badge model-badge--btn" id="modelBtn" type="button"
+            title="点击切换模型" aria-haspopup="listbox" aria-expanded="false">
+            <span id="modelName">agnes-video-2.5</span>
+            <svg class="model-badge__chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 9.5l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div class="model-menu" id="modelMenu" hidden role="listbox" aria-label="选择模型"></div>
+        </div>
         <button class="status" id="statusBtn" type="button" aria-haspopup="dialog">
           <span class="status__dot" id="statusDot"></span>
           <span class="status__label" id="statusLabel">检查密钥…</span>
@@ -249,7 +258,7 @@
 
     <footer class="footer reveal">
       <span>CineStudio · 多厂商视频生成工作台</span>
-      <span>任务与结果仅保存在当前浏览器</span>
+      <span>任务与结果持久化保存在本机服务器</span>
     </footer>
   </div>
 

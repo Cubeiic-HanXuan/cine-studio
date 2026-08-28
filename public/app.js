@@ -7,7 +7,9 @@
 // ---------------------------------------------------------------------------
 // 常量与配置
 // ---------------------------------------------------------------------------
-const MODEL = "agnes-video-2.5";
+const DEFAULT_MODEL = "agnes-video-2.5";
+let currentModel = DEFAULT_MODEL; // 当前模型：顶栏下拉切换，持久化在服务端 config.json
+let modelList = [DEFAULT_MODEL]; // 可选模型列表（/api/models 动态拉取 + 自定义）
 const STORAGE_KEY = "agnes.studio.tasks.v1";
 const POLL_MS = 1500;
 
@@ -114,6 +116,10 @@ const settingsModal = $("#settingsModal");
 const apiKeyInput = $("#apiKey");
 const baseUrlInput = $("#baseUrl");
 const videoDirInput = $("#videoDir");
+const modelSwitch = $("#modelSwitch");
+const modelBtn = $("#modelBtn");
+const modelNameEl = $("#modelName");
+const modelMenu = $("#modelMenu");
 const toastStack = $("#toastStack");
 
 // ---------------------------------------------------------------------------
@@ -799,6 +805,7 @@ function collectRequest() {
     size: currentSize,
     aspect_ratio: currentRatio,
     mode: m.apiMode,
+    model: currentModel, // 创建时选定模型，任务轮询沿用该模型
   };
   if (seedEl.value && seedEl.value.trim() !== "") body.seed = Number(seedEl.value);
 
@@ -867,6 +874,7 @@ async function createTask(requestBody, retryOf) {
     status: data.status || "queued",
     progress: data.progress || 0,
     prompt: requestBody.prompt,
+    model: requestBody.model || currentModel,
     modeLabel: MODES[currentMode].label,
     modeKey: currentMode,
     seconds: requestBody.seconds,
@@ -896,7 +904,10 @@ async function poll(task) {
 
   while (true) {
     try {
-      const res = await fetch("/api/status?video_id=" + encodeURIComponent(task.videoId));
+      // 沿用任务创建时的模型查询进度（切换模型不影响旧任务）
+      const statusUrl = "/api/status?video_id=" + encodeURIComponent(task.videoId) +
+        (task.model ? "&model_name=" + encodeURIComponent(task.model) : "");
+      const res = await fetch(statusUrl);
       if (res.status === 429) {
         await sleep(backoff);
         backoff = Math.min(backoff * 2, 15000);
@@ -980,7 +991,9 @@ async function archiveTask(task) {
 // 手动刷新单个任务状态（如已完成但未拿到视频地址时）
 async function refreshTask(task) {
   try {
-    const res = await fetch("/api/status?video_id=" + encodeURIComponent(task.videoId));
+    const statusUrl = "/api/status?video_id=" + encodeURIComponent(task.videoId) +
+      (task.model ? "&model_name=" + encodeURIComponent(task.model) : "");
+    const res = await fetch(statusUrl);
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
       task.status = data.status || task.status;
@@ -1034,6 +1047,133 @@ $("#seedRandom").addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 模型切换（顶栏下拉）：切换结果保存在服务端，对所有新生成的任务生效
+// ---------------------------------------------------------------------------
+function renderModelMenu() {
+  modelMenu.innerHTML = "";
+  const title = el("div", "model-menu__title");
+  title.textContent = "选择模型";
+  modelMenu.appendChild(title);
+
+  // 确保当前使用的模型始终出现在列表里
+  const models = modelList.includes(currentModel) ? modelList : [currentModel, ...modelList];
+  models.forEach((m) => {
+    const b = el("button", "model-menu__item" + (m === currentModel ? " is-active" : ""));
+    b.type = "button";
+    b.setAttribute("role", "option");
+    b.setAttribute("aria-selected", String(m === currentModel));
+    b.title = m;
+    const span = el("span");
+    span.textContent = m;
+    b.appendChild(span);
+    if (m === currentModel) {
+      const check = el("span", "check");
+      check.textContent = "✓";
+      b.appendChild(check);
+    }
+    b.addEventListener("click", () => {
+      closeModelMenu();
+      if (m !== currentModel) switchModel(m);
+    });
+    modelMenu.appendChild(b);
+  });
+
+  modelMenu.appendChild(el("div", "model-menu__divider"));
+
+  // 自定义模型：直接输入模型名使用
+  const row = el("div", "model-menu__custom");
+  const input = el("input");
+  input.type = "text";
+  input.placeholder = "自定义模型名称…";
+  input.setAttribute("aria-label", "自定义模型名称");
+  const ok = el("button", "tool-btn");
+  ok.type = "button";
+  ok.textContent = "使用";
+  const applyCustom = () => {
+    const v = input.value.trim();
+    if (!v) {
+      toast("请输入模型名称", "err", 2000);
+      return;
+    }
+    closeModelMenu();
+    if (!modelList.includes(v)) modelList.push(v);
+    switchModel(v);
+  };
+  ok.addEventListener("click", applyCustom);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      applyCustom();
+    }
+  });
+  row.append(input, ok);
+  modelMenu.appendChild(row);
+}
+
+function openModelMenu() {
+  // 顶栏的 mask-image 会把伸出顶栏的下拉菜单一起羽化成透明，菜单必须挂在 body 下定位
+  if (modelMenu.parentElement !== document.body) document.body.appendChild(modelMenu);
+  const r = modelBtn.getBoundingClientRect();
+  modelMenu.style.top = Math.round(r.bottom + 8) + "px";
+  modelMenu.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + "px";
+  modelMenu.hidden = false;
+  modelBtn.setAttribute("aria-expanded", "true");
+}
+function closeModelMenu() {
+  modelMenu.hidden = true;
+  modelBtn.setAttribute("aria-expanded", "false");
+}
+
+modelBtn.addEventListener("click", () => {
+  if (modelMenu.hidden) {
+    renderModelMenu();
+    openModelMenu();
+    loadModels(); // 打开时拉取最新可选模型列表
+  } else {
+    closeModelMenu();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  // 菜单已挂在 body 下，按钮区域与菜单内部都不算「外部点击」
+  const t = e.target;
+  if (!modelMenu.hidden && !modelSwitch.contains(t) && !modelMenu.contains(t)) closeModelMenu();
+});
+
+async function switchModel(m) {
+  const prev = currentModel;
+  currentModel = m;
+  modelNameEl.textContent = m;
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: m }),
+    });
+    if (!res.ok) throw new Error();
+    toast("模型已切换为 " + m, "ok", 2400);
+  } catch {
+    currentModel = prev;
+    modelNameEl.textContent = prev;
+    toast("模型切换失败", "err");
+  }
+}
+
+// 从服务端拉取可选模型列表（上游 /models 代理，失败时回退当前模型）
+async function loadModels() {
+  try {
+    const res = await fetch("/api/models");
+    const data = await res.json();
+    if (Array.isArray(data.models) && data.models.length) {
+      modelList = [...new Set([currentModel, ...data.models])];
+      if (!modelMenu.hidden) renderModelMenu();
+    }
+  } catch {
+    // 拉取失败：保留下拉里的现有项与自定义入口
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 设置与连接状态
 // ---------------------------------------------------------------------------
 async function loadSettings() {
@@ -1043,6 +1183,8 @@ async function loadSettings() {
     applyStatus(data);
     baseUrlInput.value = data.baseUrl || "";
     videoDirInput.value = data.videoDir || "";
+    currentModel = data.model || DEFAULT_MODEL;
+    modelNameEl.textContent = currentModel;
     apiKeyInput.placeholder = data.configured
       ? "已配置 " + data.apiKeyMasked + "（留空保持不变）"
       : "sk-…";
@@ -1071,7 +1213,10 @@ settingsBtn.addEventListener("click", openSettings);
 statusBtn.addEventListener("click", openSettings);
 settingsModal.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", closeSettings));
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !settingsModal.hidden) closeSettings();
+  if (e.key === "Escape") {
+    if (!settingsModal.hidden) closeSettings();
+    if (!modelMenu.hidden) closeModelMenu();
+  }
 });
 
 $("#toggleKey").addEventListener("click", () => {

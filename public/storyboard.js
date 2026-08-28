@@ -539,6 +539,7 @@ function buildShotRequest(shot) {
     size: proj.size || "720P",
     aspect_ratio: proj.aspect_ratio || "9:16",
     mode: mode === "image" ? "keyframe" : "text",
+    model: currentModel, // 复用 app.js 顶栏选择的模型
   };
   if (mode === "image") {
     if (!shot.refImage?.url || shot.refImage.uploading) return { error: "图生视频需要先上传参考图" };
@@ -575,6 +576,7 @@ async function generateShot(shot, genBtn, opts) {
       progress: data.progress || 0,
       url: null,
       error: null,
+      model: body.model,
       pollerActive: false,
       createdAt: Date.now(),
     };
@@ -597,7 +599,10 @@ async function pollShot(shot) {
 
   while (true) {
     try {
-      const res = await fetch("/api/status?video_id=" + encodeURIComponent(t.videoId));
+      // 沿用镜头创建时的模型查询进度（切换模型不影响旧任务）
+      const statusUrl = "/api/status?video_id=" + encodeURIComponent(t.videoId) +
+        (t.model ? "&model_name=" + encodeURIComponent(t.model) : "");
+      const res = await fetch(statusUrl);
       if (res.status === 429) {
         await sleep(backoff);
         backoff = Math.min(backoff * 2, 15000);

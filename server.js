@@ -24,7 +24,7 @@ const STORE_FILE = path.join(DATA_DIR, "store.json");
 const ASSETS_DIR = path.join(DATA_DIR, "assets");
 
 const DEFAULT_BASE_URL = "https://api.agnes-ai.cn/v1";
-const MODEL = "agnes-video-2.5";
+const DEFAULT_MODEL = "agnes-video-2.5";
 
 // ---------------------------------------------------------------------------
 // 配置读写（API Key 只保存在服务器本地，不进入前端代码）
@@ -75,6 +75,11 @@ function getApiKey() {
 
 function getBaseUrl() {
   return process.env.AGNES_BASE_URL || readConfig().baseUrl || DEFAULT_BASE_URL;
+}
+
+// 模型可动态切换：环境变量 > data/config.json 的 model 字段 > 默认值
+function getModel() {
+  return process.env.AGNES_MODEL || readConfig().model || DEFAULT_MODEL;
 }
 
 // 查询接口不在 /v1 下：https://api.agnes-ai.cn/agnesapi
@@ -245,7 +250,8 @@ app.get("/api/settings", (_req, res) => {
     configured: !!key,
     apiKeyMasked: maskKey(key),
     baseUrl: getBaseUrl(),
-    model: MODEL,
+    model: getModel(),
+    defaultModel: DEFAULT_MODEL,
     videoDir: getVideoDir(),
   });
 });
@@ -257,6 +263,11 @@ app.post("/api/settings", (req, res) => {
   }
   if (typeof req.body.baseUrl === "string" && req.body.baseUrl.trim()) {
     cfg.baseUrl = req.body.baseUrl.replace(/\/+$/, "");
+  }
+  if (typeof req.body.model === "string") {
+    const m = req.body.model.trim();
+    if (m) cfg.model = m;
+    else delete cfg.model; // 留空恢复默认模型
   }
   if (typeof req.body.videoDir === "string") {
     const d = req.body.videoDir.trim();
@@ -299,6 +310,34 @@ app.post("/api/state", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// 可选模型列表（供前端下拉切换）：优先拉取上游 /models，失败则回退当前模型
+// ---------------------------------------------------------------------------
+app.get("/api/models", async (_req, res) => {
+  const fallback = [...new Set([getModel(), DEFAULT_MODEL])];
+  try {
+    const upstream = await fetch(`${getBaseUrl()}/models`, {
+      headers: { Authorization: `Bearer ${getApiKey()}` },
+    });
+    const data = await upstream.json().catch(() => null);
+    let ids = [];
+    if (Array.isArray(data?.data)) {
+      ids = data.data.map((m) => (typeof m === "string" ? m : m?.id)).filter((x) => typeof x === "string" && x);
+    } else if (Array.isArray(data?.models)) {
+      ids = data.models.map((m) => (typeof m === "string" ? m : m?.id)).filter((x) => typeof x === "string" && x);
+    }
+    // 上游若混有大量非视频模型，优先只保留名称带 video 的；筛不出再全部返回
+    const videoIds = ids.filter((id) => /video/i.test(id));
+    const models = videoIds.length ? videoIds : ids;
+    if (upstream.ok && models.length) {
+      return res.json({ models: [...new Set([...models, ...fallback])], source: "upstream" });
+    }
+  } catch (err) {
+    console.error("[models]", err.message);
+  }
+  res.json({ models: fallback, source: "fallback" });
+});
+
+// ---------------------------------------------------------------------------
 // 创建视频任务（代理）
 // ---------------------------------------------------------------------------
 app.post("/api/videos", async (req, res) => {
@@ -307,7 +346,9 @@ app.post("/api/videos", async (req, res) => {
     return res.status(401).json({ error: "尚未配置 API Key，请先点击右上角「设置」填入。" });
   }
 
-  const body = { ...req.body, model: MODEL };
+  // 模型：优先用前端本次请求指定的（支持动态切换），否则用服务器配置的模型
+  const requested = typeof req.body?.model === "string" ? req.body.model.trim() : "";
+  const body = { ...req.body, model: requested || getModel() };
   if (body.n == null) body.n = 1;
 
   const url = `${getBaseUrl()}/videos`;
@@ -346,7 +387,9 @@ app.get("/api/status", async (req, res) => {
   if (!videoId) {
     return res.status(400).json({ error: "缺少 video_id" });
   }
-  const params = new URLSearchParams({ video_id: videoId, model_name: MODEL });
+  // 模型：优先用任务创建时的模型（前端随查询带上），切换模型不影响旧任务的进度查询
+  const model = String(req.query.model_name || req.query.model || "").trim() || getModel();
+  const params = new URLSearchParams({ video_id: videoId, model_name: model });
   const url = `${getQueryOrigin()}/agnesapi?${params.toString()}`;
   try {
     const upstream = await fetch(url, {
