@@ -467,9 +467,10 @@ function renderShotResult(shot, resultEl) {
   }
 
   if (t.status === "completed" && t.url) {
+    const src = t.localUrl || t.url; // 优先本地文件
     const wrap = el("div", "task__video-wrap");
     const video = el("video");
-    video.src = t.url;
+    video.src = src;
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
@@ -480,12 +481,17 @@ function renderShotResult(shot, resultEl) {
 
     const acts = el("div", "task__actions");
     const dl = el("a", "mini-btn");
-    dl.href = "/api/download?url=" + encodeURIComponent(t.url);
+    if (t.localUrl) {
+      dl.href = t.localUrl;
+      dl.setAttribute("download", (t.localFile || "video.mp4").split("/").pop());
+    } else {
+      dl.href = "/api/download?url=" + encodeURIComponent(t.url);
+    }
     dl.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>下载`;
     acts.appendChild(dl);
 
     const open = el("a", "mini-btn");
-    open.href = t.url;
+    open.href = src;
     open.target = "_blank";
     open.rel = "noreferrer";
     open.textContent = "新窗口打开";
@@ -494,8 +500,9 @@ function renderShotResult(shot, resultEl) {
     const copy = el("button", "mini-btn");
     copy.type = "button";
     copy.textContent = "复制链接";
+    const copyTarget = src.startsWith("/") ? location.origin + src : src;
     copy.addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(t.url); toast("链接已复制", "ok"); }
+      try { await navigator.clipboard.writeText(copyTarget); toast("链接已复制", "ok"); }
       catch { toast("复制失败", "err"); }
     });
     acts.appendChild(copy);
@@ -617,6 +624,45 @@ async function pollShot(shot) {
     await sleep(POLL_SB_MS);
   }
   t.pollerActive = false;
+  // 完成后自动下载到本地存储目录
+  if (t.status === "completed" && t.url) archiveShot(shot);
+}
+
+async function archiveShot(shot) {
+  const proj = currentProject();
+  const t = shot.task;
+  if (!t || !t.url) return;
+  try {
+    const res = await fetch("/api/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        records: [
+          {
+            url: t.url,
+            videoId: t.videoId,
+            group: proj.name || "未命名剧本",
+            shotNo: proj.shots.indexOf(shot) + 1,
+            scene: shot.scene || "",
+            prompt: shot.description || "",
+            seconds: shot.seconds,
+            size: proj.size,
+            ratio: proj.aspect_ratio,
+            createdAt: t.createdAt || proj.updatedAt || Date.now(),
+          },
+        ],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.saved && data.saved[0]) {
+      t.localUrl = data.saved[0].localUrl;
+      t.localFile = data.saved[0].file;
+      persist();
+      renderShotResult(shot, shotEl(shot, ".shot-result"));
+    }
+  } catch (e) {
+    console.warn("[archive]", e.message);
+  }
 }
 
 async function batchGenerate() {

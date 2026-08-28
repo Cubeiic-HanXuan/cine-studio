@@ -113,6 +113,7 @@ const settingsBtn = $("#settingsBtn");
 const settingsModal = $("#settingsModal");
 const apiKeyInput = $("#apiKey");
 const baseUrlInput = $("#baseUrl");
+const videoDirInput = $("#videoDir");
 const toastStack = $("#toastStack");
 
 // ---------------------------------------------------------------------------
@@ -582,6 +583,7 @@ function makeTaskCard(task) {
 
 function renderTaskBody(task, body) {
   body.innerHTML = "";
+  const src = task.localUrl || task.url; // 优先本地文件，回退远程
 
   // 状态行
   const statusRow = el("div", "task__status");
@@ -608,7 +610,7 @@ function renderTaskBody(task, body) {
   if (task.status === "completed" && task.url) {
     const wrap = el("div", "task__video-wrap");
     const video = el("video");
-    video.src = task.url;
+    video.src = src;
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
@@ -620,7 +622,7 @@ function renderTaskBody(task, body) {
     const failText = el("span");
     failText.textContent = "视频预览加载失败";
     const failLink = el("a", "mini-btn");
-    failLink.href = task.url;
+    failLink.href = src;
     failLink.target = "_blank";
     failLink.rel = "noreferrer";
     failLink.textContent = "在新窗口打开";
@@ -656,13 +658,18 @@ function renderTaskBody(task, body) {
 
   if (task.status === "completed" && task.url) {
     const dl = el("a", "mini-btn");
-    dl.href = "/api/download?url=" + encodeURIComponent(task.url);
+    if (task.localUrl) {
+      dl.href = task.localUrl;
+      dl.setAttribute("download", (task.localFile || "video.mp4").split("/").pop());
+    } else {
+      dl.href = "/api/download?url=" + encodeURIComponent(task.url);
+    }
     dl.title = "下载视频";
     dl.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>下载`;
     actions.appendChild(dl);
 
     const open = el("a", "mini-btn");
-    open.href = task.url;
+    open.href = src;
     open.target = "_blank";
     open.rel = "noreferrer";
     open.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M9 7h8v8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>新窗口打开`;
@@ -671,9 +678,10 @@ function renderTaskBody(task, body) {
     const copy = el("button", "mini-btn");
     copy.type = "button";
     copy.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="1.6"/></svg>复制链接`;
+    const copyTarget = src.startsWith("/") ? location.origin + src : src;
     copy.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(task.url);
+        await navigator.clipboard.writeText(copyTarget);
         toast("链接已复制", "ok");
       } catch {
         toast("复制失败，请手动复制", "err");
@@ -866,6 +874,44 @@ async function poll(task) {
     await sleep(POLL_MS);
   }
   task.pollerActive = false;
+  // 完成后自动把视频下载到本地存储目录（此后播放走本地文件，不再依赖远程地址）
+  if (task.status === "completed" && task.url) archiveTask(task);
+}
+
+// 下载单个任务视频到本地存储目录，并记录 localUrl / localFile
+async function archiveTask(task) {
+  try {
+    const res = await fetch("/api/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        records: [
+          {
+            url: task.url,
+            videoId: task.videoId,
+            group: "单镜生成",
+            shotNo: null,
+            scene: "",
+            prompt: task.prompt,
+            seconds: task.seconds,
+            size: task.size,
+            ratio: task.ratio,
+            createdAt: task.createdAt,
+          },
+        ],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.saved && data.saved[0]) {
+      task.localUrl = data.saved[0].localUrl;
+      task.localFile = data.saved[0].file;
+      saveTasks();
+      updateTask(task);
+    }
+  } catch (e) {
+    // 落盘失败不影响使用（仍可回退到远程地址）
+    console.warn("[archive]", e.message);
+  }
 }
 
 // 手动刷新单个任务状态（如已完成但未拿到视频地址时）
@@ -929,6 +975,7 @@ async function loadSettings() {
     const data = await res.json();
     applyStatus(data);
     baseUrlInput.value = data.baseUrl || "";
+    videoDirInput.value = data.videoDir || "";
     apiKeyInput.placeholder = data.configured
       ? "已配置 " + data.apiKeyMasked + "（留空保持不变）"
       : "sk-…";
@@ -969,6 +1016,7 @@ $("#toggleKey").addEventListener("click", () => {
 $("#saveSettingsBtn").addEventListener("click", async () => {
   const payload = { baseUrl: baseUrlInput.value.trim() };
   if (apiKeyInput.value.trim()) payload.apiKey = apiKeyInput.value.trim();
+  payload.videoDir = videoDirInput.value.trim();
   try {
     const res = await fetch("/api/settings", {
       method: "POST",

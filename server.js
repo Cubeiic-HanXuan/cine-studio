@@ -57,12 +57,22 @@ function maskKey(key) {
   return key.slice(0, 4) + "••••••" + key.slice(-4);
 }
 
+// 视频本地存储目录：默认项目内 videos/，可在「设置」里改，或用环境变量 VIDEO_DIR
+function getVideoDir() {
+  return process.env.VIDEO_DIR || readConfig().videoDir || path.join(__dirname, "videos");
+}
+
 // ---------------------------------------------------------------------------
 // Express 应用
 // ---------------------------------------------------------------------------
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// 本地视频库：把存储目录以 /videos 暴露给浏览器播放/预览
+app.use("/videos", (req, res, next) => {
+  express.static(getVideoDir())(req, res, next);
+});
 
 // 上传：内存接收，最大 500MB
 const upload = multer({
@@ -188,6 +198,7 @@ app.get("/api/settings", (_req, res) => {
     apiKeyMasked: maskKey(key),
     baseUrl: getBaseUrl(),
     model: MODEL,
+    videoDir: getVideoDir(),
   });
 });
 
@@ -198,6 +209,11 @@ app.post("/api/settings", (req, res) => {
   }
   if (typeof req.body.baseUrl === "string" && req.body.baseUrl.trim()) {
     cfg.baseUrl = req.body.baseUrl.replace(/\/+$/, "");
+  }
+  if (typeof req.body.videoDir === "string") {
+    const d = req.body.videoDir.trim();
+    if (d) cfg.videoDir = d.replace(/\/+$/, "");
+    else delete cfg.videoDir; // 留空恢复默认
   }
   writeConfig(cfg);
   res.json({ ok: true });
@@ -351,19 +367,20 @@ function csvCell(v) {
   return '"' + s.replace(/"/g, '""') + '"';
 }
 
-app.post("/api/export", async (req, res) => {
+app.post("/api/archive", async (req, res) => {
   const records = req.body?.records;
   if (!Array.isArray(records) || !records.length) {
     return res.status(400).json({ error: "没有可下载的视频记录" });
   }
-  const baseDir = path.join(__dirname, "downloads");
+  const baseDir = getVideoDir();
   fs.mkdirSync(baseDir, { recursive: true });
+  const saved = [];
   const manifest = [];
-  let saved = 0;
   let skipped = 0;
 
   for (const r of records) {
     const url = typeof r.url === "string" ? r.url : "";
+    const videoId = String(r.videoId || r.id || "");
     if (!/^https?:\/\//.test(url)) { skipped++; continue; }
     try {
       const upstream = await fetch(url, {
@@ -375,7 +392,7 @@ app.post("/api/export", async (req, res) => {
       const group = safePathName(r.group || "未分组");
       const shotNo = r.shotNo ? String(r.shotNo).padStart(2, "0") : "00";
       const label = safePathName(r.scene || r.prompt || "video").slice(0, 24);
-      const vid = String(r.videoId || "").slice(-6) || Date.now().toString(36);
+      const vid = videoId.slice(-6) || Date.now().toString(36);
       const dir = path.join(baseDir, group);
       fs.mkdirSync(dir, { recursive: true });
       const filename = `${shotNo}_${label}_${vid}${guessVideoExt(url)}`;
@@ -389,10 +406,12 @@ app.post("/api/export", async (req, res) => {
       });
 
       const bytes = fs.statSync(filePath).size;
-      manifest.push({ ...r, file: path.relative(baseDir, filePath), bytes });
-      saved++;
+      const rel = path.relative(baseDir, filePath).split(path.sep).join("/");
+      const item = { videoId, url, localUrl: "/videos/" + rel, file: rel, bytes };
+      saved.push(item);
+      manifest.push({ ...r, file: rel, bytes });
     } catch (err) {
-      console.error("[export]", err.message);
+      console.error("[archive]", err.message);
       skipped++;
     }
   }
@@ -418,7 +437,7 @@ app.post("/api/export", async (req, res) => {
   try {
     fs.writeFileSync(path.join(baseDir, "清单.csv"), "\ufeff" + lines.join("\r\n"), "utf8");
   } catch (e) {
-    console.error("[export csv]", e.message);
+    console.error("[archive csv]", e.message);
   }
 
   res.json({ ok: true, saved, skipped, total: records.length, dir: baseDir });

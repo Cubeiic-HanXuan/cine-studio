@@ -271,6 +271,10 @@
       <label class="field__label" for="baseUrl">Base URL</label>
       <input type="text" id="baseUrl" placeholder="https://api.agnes-ai.cn/v1" />
 
+      <label class="field__label" for="videoDir">视频存储目录（本地磁盘）</label>
+      <input type="text" id="videoDir" placeholder="留空默认保存到项目 videos/ 目录" />
+      <p class="modal__note">生成完成的视频会自动下载保存到此目录，之后播放/下载都走本地文件，不再依赖会过期的远程地址。</p>
+
       <div class="modal__actions">
         <button class="btn btn--ghost" id="clearKeyBtn" type="button">清除密钥</button>
         <button class="btn btn--primary" id="saveSettingsBtn" type="button">保存</button>

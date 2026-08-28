@@ -1,6 +1,7 @@
 node_modules/
 data/
 downloads/
+videos/
 .env
 .DS_Store
 npm-debug.log*

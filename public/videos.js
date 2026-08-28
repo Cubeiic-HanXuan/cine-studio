@@ -40,6 +40,8 @@ function collectRecords() {
           scene: "",
           prompt: t.prompt || "",
           url: t.url,
+          localUrl: t.localUrl || null,
+          localFile: t.localFile || null,
           seconds: t.seconds,
           size: t.size,
           ratio: t.ratio,
@@ -65,6 +67,8 @@ function collectRecords() {
             scene: s.scene || "",
             prompt: s.description || "",
             url: s.task.url,
+            localUrl: s.task.localUrl || null,
+            localFile: s.task.localFile || null,
             seconds: s.seconds,
             size: p.size || "720P",
             ratio: p.aspect_ratio || "9:16",
@@ -109,6 +113,7 @@ function formatTime(ts) {
 // ---------------------------------------------------------------------------
 function makeVideoCard(r) {
   const card = el("div", "video-card");
+  const src = r.localUrl || r.url; // 优先本地文件，回退远程
 
   // 媒体区：缩略图，点击切换为内联预览
   const media = el("div", "video-card__media");
@@ -125,7 +130,7 @@ function makeVideoCard(r) {
   media.addEventListener("click", () => {
     if (media.querySelector("video")) return;
     const v = el("video");
-    v.src = r.url;
+    v.src = src;
     v.controls = true;
     v.autoplay = true;
     v.playsInline = true;
@@ -186,13 +191,18 @@ function makeVideoCard(r) {
   const actions = el("div", "task__actions");
 
   const dl = el("a", "mini-btn");
-  dl.href = "/api/download?url=" + encodeURIComponent(r.url);
+  if (r.localUrl) {
+    dl.href = r.localUrl;
+    dl.setAttribute("download", (r.localFile || "video.mp4").split("/").pop());
+  } else {
+    dl.href = "/api/download?url=" + encodeURIComponent(r.url);
+  }
   dl.title = "下载视频";
   dl.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>下载`;
   actions.appendChild(dl);
 
   const open = el("a", "mini-btn");
-  open.href = r.url;
+  open.href = src;
   open.target = "_blank";
   open.rel = "noreferrer";
   open.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M9 7h8v8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>新窗口打开`;
@@ -201,8 +211,9 @@ function makeVideoCard(r) {
   const copyLink = el("button", "mini-btn");
   copyLink.type = "button";
   copyLink.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="1.6"/></svg>复制链接`;
+  const copyTarget = src.startsWith("/") ? location.origin + src : src;
   copyLink.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(r.url); toast("链接已复制", "ok"); }
+    try { await navigator.clipboard.writeText(copyTarget); toast("链接已复制", "ok"); }
     catch { toast("复制失败", "err"); }
   });
   actions.appendChild(copyLink);
@@ -258,21 +269,26 @@ function renderVideos() {
 const DOWNLOAD_ALL_HTML = `<span class="btn__idle"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>一键下载全部到磁盘</span>`;
 
 videosDownloadAll.addEventListener("click", async () => {
-  const records = collectRecords();
-  if (!records.length) { toast("没有可下载的视频", "err"); return; }
+  const all = collectRecords();
+  if (!all.length) { toast("没有可下载的视频", "err"); return; }
+  // 只下载尚未落盘到本地的视频
+  const records = all.filter((r) => !r.localUrl);
+  if (!records.length) { toast("所有视频都已在本地磁盘", "info"); return; }
 
   videosDownloadAll.disabled = true;
   videosDownloadAll.textContent = "正在下载到磁盘…";
   try {
-    const res = await fetch("/api/export", {
+    const res = await fetch("/api/archive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ records }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { toast(data.error || "下载失败", "err", 5000); return; }
-    toast(`已保存 ${data.saved} 个视频到磁盘（跳过 ${data.skipped} 个）`, "ok", 6000);
+    applyLocalMapping(data.saved || []);
+    toast(`已保存 ${data.saved.length} 个视频到磁盘（跳过 ${data.skipped} 个）`, "ok", 6000);
     toast(`保存目录：${data.dir}`, "info", 9000);
+    renderVideos();
   } catch (err) {
     toast("下载失败：" + err.message, "err");
   } finally {
@@ -280,6 +296,37 @@ videosDownloadAll.addEventListener("click", async () => {
     videosDownloadAll.innerHTML = DOWNLOAD_ALL_HTML;
   }
 });
+
+// 把 /api/archive 返回的本地映射写回 localStorage（单镜任务 + 分镜镜头）
+function applyLocalMapping(savedList) {
+  if (!savedList || !savedList.length) return;
+  const byUrl = new Map(savedList.map((s) => [s.url, s.localUrl]));
+  const byId = new Map(savedList.map((s) => [s.videoId, s.localUrl]));
+
+  try {
+    const tasks = JSON.parse(localStorage.getItem(TASKS_KEY) || "[]");
+    let changed = false;
+    (Array.isArray(tasks) ? tasks : []).forEach((t) => {
+      const lu = (t.videoId && byId.get(t.videoId)) || byUrl.get(t.url);
+      if (lu && t.localUrl !== lu) { t.localUrl = lu; changed = true; }
+    });
+    if (changed) localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+  } catch {}
+
+  try {
+    const projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
+    let changed = false;
+    (Array.isArray(projects) ? projects : []).forEach((p) => {
+      (Array.isArray(p.shots) ? p.shots : []).forEach((s) => {
+        if (s && s.task) {
+          const lu = (s.task.videoId && byId.get(s.task.videoId)) || byUrl.get(s.task.url);
+          if (lu && s.task.localUrl !== lu) { s.task.localUrl = lu; changed = true; }
+        }
+      });
+    });
+    if (changed) localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  } catch {}
+}
 
 // ---------------------------------------------------------------------------
 // 导出记录 CSV
