@@ -519,8 +519,9 @@ function renderTasks() {
 
 function makeTaskCard(task) {
   const card = el("div", "task");
+  card.dataset.id = task.id;
 
-  // 顶部
+  // 顶部（静态：不随轮询变化）
   const top = el("div", "task__top");
   const thumb = el("div", "task__thumb");
   if (task.thumb) {
@@ -572,6 +573,16 @@ function makeTaskCard(task) {
   top.append(thumb, meta);
   card.appendChild(top);
 
+  // 动态区域（状态 / 进度 / 视频 / 操作，随轮询就地更新）
+  const body = el("div", "task__body");
+  renderTaskBody(task, body);
+  card.appendChild(body);
+  return card;
+}
+
+function renderTaskBody(task, body) {
+  body.innerHTML = "";
+
   // 状态行
   const statusRow = el("div", "task__status");
   const tag = el("span", "tag tag--" + (STATUS_TAG[task.status] || "queued"));
@@ -582,7 +593,7 @@ function makeTaskCard(task) {
     pct.textContent = (task.progress || 0) + "%";
     statusRow.appendChild(pct);
   }
-  card.appendChild(statusRow);
+  body.appendChild(statusRow);
 
   // 进度条
   if (task.status === "in_progress" || task.status === "queued") {
@@ -590,7 +601,7 @@ function makeTaskCard(task) {
     const bar = el("div", "progress__bar");
     bar.style.width = (task.progress || 0) + "%";
     p.appendChild(bar);
-    card.appendChild(p);
+    body.appendChild(p);
   }
 
   // 视频预览
@@ -620,7 +631,7 @@ function makeTaskCard(task) {
     });
 
     wrap.append(video, fail);
-    card.appendChild(wrap);
+    body.appendChild(wrap);
   } else if (task.status === "completed" && !task.url) {
     const miss = el("div", "task__video-miss");
     const missText = el("span");
@@ -630,14 +641,14 @@ function makeTaskCard(task) {
     fetchBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>刷新获取`;
     fetchBtn.addEventListener("click", () => refreshTask(task));
     miss.append(missText, fetchBtn);
-    card.appendChild(miss);
+    body.appendChild(miss);
   }
 
   // 错误
   if (task.status === "failed" || task.status === "error") {
     const err = el("div", "task__error");
     err.textContent = task.error || "生成失败，请重试";
-    card.appendChild(err);
+    body.appendChild(err);
   }
 
   // 操作
@@ -691,8 +702,15 @@ function makeTaskCard(task) {
   del.addEventListener("click", () => removeTask(task));
   actions.appendChild(del);
 
-  card.appendChild(actions);
-  return card;
+  body.appendChild(actions);
+}
+
+// 就地更新单个任务卡片的动态区域（不重建整个列表，避免闪烁）
+function updateTask(task) {
+  const card = document.querySelector('.task[data-id="' + task.id + '"]');
+  if (!card) return;
+  const body = card.querySelector(".task__body");
+  if (body) renderTaskBody(task, body);
 }
 
 function removeTask(task) {
@@ -830,7 +848,7 @@ async function poll(task) {
         task.error = data.error || `查询失败（HTTP ${res.status}）`;
       }
       saveTasks();
-      renderTasks();
+      updateTask(task);
       if (task.status === "completed") {
         toast("视频生成完成 🎬", "ok");
         break;
@@ -842,7 +860,7 @@ async function poll(task) {
       task.status = "error";
       task.error = err.message;
       saveTasks();
-      renderTasks();
+      updateTask(task);
       break;
     }
     await sleep(POLL_MS);
@@ -861,7 +879,7 @@ async function refreshTask(task) {
       task.url = extractUrl(data) || task.url || null;
       task.error = data.error?.message || data.error || null;
       saveTasks();
-      renderTasks();
+      updateTask(task);
       if (task.status === "completed" && task.url) toast("已获取到视频", "ok", 1600);
       else if (task.status === "completed") toast("任务已完成，但暂未返回视频地址", "info", 2600);
       else toast("状态已刷新", "ok", 1600);
