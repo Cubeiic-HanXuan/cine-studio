@@ -326,6 +326,104 @@ app.get("/api/download", async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// 导出：一键下载全部视频到本地磁盘，并按剧本分组 + 生成清单 CSV
+// ---------------------------------------------------------------------------
+function safePathName(name) {
+  const s = String(name || "")
+    .replace(/[\\/:*?"<>|\n\r\t]+/g, "-")
+    .replace(/\s+/g, "-")
+    .trim();
+  return s.slice(0, 60) || "未命名";
+}
+
+function guessVideoExt(url) {
+  try {
+    const p = new URL(url).pathname;
+    const ext = (p.split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (["mp4", "webm", "mov", "m4v", "mkv"].includes(ext)) return "." + ext;
+  } catch {}
+  return ".mp4";
+}
+
+function csvCell(v) {
+  const s = v == null ? "" : String(v);
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+app.post("/api/export", async (req, res) => {
+  const records = req.body?.records;
+  if (!Array.isArray(records) || !records.length) {
+    return res.status(400).json({ error: "没有可下载的视频记录" });
+  }
+  const baseDir = path.join(__dirname, "downloads");
+  fs.mkdirSync(baseDir, { recursive: true });
+  const manifest = [];
+  let saved = 0;
+  let skipped = 0;
+
+  for (const r of records) {
+    const url = typeof r.url === "string" ? r.url : "";
+    if (!/^https?:\/\//.test(url)) { skipped++; continue; }
+    try {
+      const upstream = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "*/*" },
+        redirect: "follow",
+      });
+      if (!upstream.ok || !upstream.body) { skipped++; continue; }
+
+      const group = safePathName(r.group || "未分组");
+      const shotNo = r.shotNo ? String(r.shotNo).padStart(2, "0") : "00";
+      const label = safePathName(r.scene || r.prompt || "video").slice(0, 24);
+      const vid = String(r.videoId || "").slice(-6) || Date.now().toString(36);
+      const dir = path.join(baseDir, group);
+      fs.mkdirSync(dir, { recursive: true });
+      const filename = `${shotNo}_${label}_${vid}${guessVideoExt(url)}`;
+      const filePath = path.join(dir, filename);
+
+      await new Promise((resolve, reject) => {
+        const out = fs.createWriteStream(filePath);
+        Readable.fromWeb(upstream.body).pipe(out);
+        out.on("finish", resolve);
+        out.on("error", reject);
+      });
+
+      const bytes = fs.statSync(filePath).size;
+      manifest.push({ ...r, file: path.relative(baseDir, filePath), bytes });
+      saved++;
+    } catch (err) {
+      console.error("[export]", err.message);
+      skipped++;
+    }
+  }
+
+  const header = ["剧本", "镜头号", "场景", "提示词", "时长(秒)", "分辨率", "画幅", "生成时间", "文件", "原地址"];
+  const lines = [header.map(csvCell).join(",")];
+  for (const m of manifest) {
+    lines.push(
+      [
+        csvCell(m.group),
+        csvCell(m.shotNo ?? ""),
+        csvCell(m.scene || ""),
+        csvCell(m.prompt || ""),
+        csvCell(m.seconds ?? ""),
+        csvCell(m.size || ""),
+        csvCell(m.ratio || ""),
+        csvCell(m.createdAt ? new Date(m.createdAt).toLocaleString("zh-CN") : ""),
+        csvCell(m.file),
+        csvCell(m.url),
+      ].join(",")
+    );
+  }
+  try {
+    fs.writeFileSync(path.join(baseDir, "清单.csv"), "\ufeff" + lines.join("\r\n"), "utf8");
+  } catch (e) {
+    console.error("[export csv]", e.message);
+  }
+
+  res.json({ ok: true, saved, skipped, total: records.length, dir: baseDir });
+});
+
 app.listen(PORT, () => {
   const key = getApiKey();
   console.log("");

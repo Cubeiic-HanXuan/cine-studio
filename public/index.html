@@ -49,6 +49,7 @@
     <nav class="views reveal" role="tablist" aria-label="视图切换">
       <button class="view-tab is-active" data-view="single" role="tab" aria-selected="true">单镜生成</button>
       <button class="view-tab" data-view="storyboard" role="tab" aria-selected="false">分镜脚本</button>
+      <button class="view-tab" data-view="videos" role="tab" aria-selected="false">已生成视频</button>
     </nav>
 
     <!-- ============================== 主体（单镜生成） ============================== -->
@@ -228,6 +229,24 @@
       </div>
     </section>
 
+    <!-- ============================== 已生成视频 ============================== -->
+    <section class="videos" id="videosView" hidden>
+      <div class="videos-toolbar reveal">
+        <div class="videos-toolbar__group">
+          <button class="btn btn--ghost is-active" id="videosGroupBtn" type="button">按剧本分组</button>
+          <button class="btn btn--ghost" id="videosSortBtn" type="button">最新在前</button>
+          <span class="videos-count" id="videosCount"></span>
+        </div>
+        <div class="videos-toolbar__group videos-toolbar__group--right">
+          <button class="btn btn--ghost" id="videosExportCsv" type="button">导出记录 CSV</button>
+          <button class="btn btn--primary" id="videosDownloadAll" type="button">
+            <span class="btn__idle"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>一键下载全部到磁盘</span>
+          </button>
+        </div>
+      </div>
+      <div class="videos-list" id="videosList"></div>
+    </section>
+
     <footer class="footer reveal">
       <span>CineStudio · 多厂商视频生成工作台</span>
       <span>任务与结果仅保存在当前浏览器</span>
@@ -264,5 +283,6 @@
 
   <script src="app.js"></script>
   <script src="storyboard.js"></script>
+  <script src="videos.js"></script>
 </body>
 </html>

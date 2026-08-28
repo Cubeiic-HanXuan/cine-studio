@@ -565,6 +565,7 @@ async function generateShot(shot, genBtn, opts) {
       url: null,
       error: null,
       pollerActive: false,
+      createdAt: Date.now(),
     };
     persist();
     renderShotResult(shot, shotEl(shot, ".shot-result"));
@@ -802,7 +803,10 @@ document.querySelectorAll(".view-tab").forEach((tab) => {
     const view = tab.dataset.view;
     singleView.hidden = view !== "single";
     sbView.hidden = view !== "storyboard";
+    const vv = document.getElementById("videosView");
+    if (vv) vv.hidden = view !== "videos";
     if (view === "storyboard") renderStoryboard();
+    if (view === "videos" && typeof renderVideos === "function") renderVideos();
   });
 });
 
