@@ -955,6 +955,7 @@ async function archiveTask(task) {
             size: task.size,
             ratio: task.ratio,
             createdAt: task.createdAt,
+            thumb: task.thumb || null,
           },
         ],
       }),

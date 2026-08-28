@@ -673,6 +673,7 @@ async function archiveShot(shot) {
             size: proj.size,
             ratio: proj.aspect_ratio,
             createdAt: t.createdAt || proj.updatedAt || Date.now(),
+            thumb: (shot.refImage && shot.refImage.url) || null,
           },
         ],
       }),

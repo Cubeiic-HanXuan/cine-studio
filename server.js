@@ -416,9 +416,28 @@ app.post("/api/archive", async (req, res) => {
     }
   }
 
-  const header = ["剧本", "镜头号", "场景", "提示词", "时长(秒)", "分辨率", "画幅", "生成时间", "文件", "原地址"];
-  const lines = [header.map(csvCell).join(",")];
+  // 合并进已有清单（按「文件」upsert），避免每次归档覆盖掉历史记录
+  const merged = new Map();
+  for (const e of readManifestCsv(baseDir)) merged.set(e.file, e);
   for (const m of manifest) {
+    merged.set(m.file, {
+      group: m.group,
+      shotNo: m.shotNo,
+      scene: m.scene || "",
+      prompt: m.prompt || "",
+      seconds: m.seconds ?? "",
+      size: m.size || "",
+      ratio: m.ratio || "",
+      file: m.file,
+      url: m.url || "",
+      thumb: m.thumb || "",
+      time: m.createdAt ? new Date(m.createdAt).toLocaleString("zh-CN") : "",
+    });
+  }
+
+  const header = ["剧本", "镜头号", "场景", "提示词", "时长(秒)", "分辨率", "画幅", "生成时间", "文件", "原地址", "参考图片"];
+  const lines = [header.map(csvCell).join(",")];
+  for (const m of merged.values()) {
     lines.push(
       [
         csvCell(m.group),
@@ -428,9 +447,10 @@ app.post("/api/archive", async (req, res) => {
         csvCell(m.seconds ?? ""),
         csvCell(m.size || ""),
         csvCell(m.ratio || ""),
-        csvCell(m.createdAt ? new Date(m.createdAt).toLocaleString("zh-CN") : ""),
+        csvCell(m.time || ""),
         csvCell(m.file),
-        csvCell(m.url),
+        csvCell(m.url || ""),
+        csvCell(m.thumb || ""),
       ].join(",")
     );
   }
@@ -445,13 +465,81 @@ app.post("/api/archive", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // 扫描本地存储目录，返回磁盘上已有的视频（用于恢复：即使浏览器数据被清，
-// 已下载到磁盘的视频也能在「已生成视频」里找回来）
+// 已下载到磁盘的视频也能在「已生成视频」里找回来）。优先读「清单.csv」拿完整元数据。
 // ---------------------------------------------------------------------------
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov", ".m4v", ".mkv"]);
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQ = false;
+  const s = String(text || "").replace(/^\ufeff/, "");
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQ) {
+      if (c === '"') {
+        if (s[i + 1] === '"') { field += '"'; i++; }
+        else inQ = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && s[i + 1] === "\n") i++;
+        row.push(field); rows.push(row); row = []; field = "";
+      } else field += c;
+    }
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+}
+
+// 读取「清单.csv」为对象数组（按列名映射，兼容旧版缺少「参考图片」列的清单）
+function readManifestCsv(baseDir) {
+  const out = [];
+  try {
+    const csvText = fs.readFileSync(path.join(baseDir, "清单.csv"), "utf8");
+    const rows = parseCsv(csvText);
+    if (rows.length > 1) {
+      const header = rows[0];
+      const idx = (name) => header.findIndex((h) => h === name);
+      const cols = {
+        group: idx("剧本"), shot: idx("镜头号"), scene: idx("场景"), prompt: idx("提示词"),
+        seconds: idx("时长(秒)"), size: idx("分辨率"), ratio: idx("画幅"),
+        file: idx("文件"), url: idx("原地址"), thumb: idx("参考图片"), time: idx("生成时间"),
+      };
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        const file = row[cols.file] || "";
+        if (!file) continue;
+        out.push({
+          group: row[cols.group] || "",
+          shotNo: row[cols.shot] || "",
+          scene: row[cols.scene] || "",
+          prompt: row[cols.prompt] || "",
+          seconds: row[cols.seconds] || "",
+          size: row[cols.size] || "",
+          ratio: row[cols.ratio] || "",
+          file,
+          url: row[cols.url] || "",
+          thumb: row[cols.thumb] || "",
+          time: row[cols.time] || "",
+        });
+      }
+    }
+  } catch {}
+  return out;
+}
 
 app.get("/api/library", (_req, res) => {
   const baseDir = getVideoDir();
   const records = [];
+
+  // 先解析「清单.csv」，按「文件」列建立完整元数据映射
+  const csvMap = new Map();
+  for (const m of readManifestCsv(baseDir)) csvMap.set(m.file, m);
+
   try {
     const groups = fs.readdirSync(baseDir, { withFileTypes: true });
     for (const g of groups) {
@@ -464,7 +552,7 @@ app.get("/api/library", (_req, res) => {
         try {
           const full = path.join(groupDir, f);
           const st = fs.statSync(full);
-          const rel = (g.name + "/" + f);
+          const rel = g.name + "/" + f;
           // 文件名格式：<镜头号>_<label>_<videoId后缀>.<ext>
           const base = f.slice(0, -ext.length);
           const parts = base.split("_");
@@ -472,25 +560,51 @@ app.get("/api/library", (_req, res) => {
           const shotNo = /^\d+$/.test(shotRaw) ? parseInt(shotRaw, 10) : null;
           const suffix = parts.length >= 3 ? parts[parts.length - 1] : "";
           const label = parts.slice(1, -1).join("_");
-          records.push({
-            id: "disk_" + suffix + "_" + shotNo,
-            videoId: suffix ? "disk_" + suffix : "",
-            group: g.name,
-            shotNo: shotNo === 0 ? null : shotNo,
-            scene: "",
-            prompt: label || "",
-            url: "",
-            localUrl: "/videos/" + rel,
-            localFile: rel,
-            seconds: "",
-            size: "",
-            ratio: "",
-            modeLabel: "",
-            createdAt: st.mtimeMs,
-            thumb: null,
-            bytes: st.size,
-            fromDisk: true,
-          });
+
+          const meta = csvMap.get(rel);
+          let rec;
+          if (meta) {
+            rec = {
+              id: "disk_" + suffix + "_" + (shotNo ?? 0),
+              videoId: "",
+              group: meta.group || g.name,
+              shotNo: meta.shotNo ? parseInt(meta.shotNo, 10) || null : (shotNo === 0 ? null : shotNo),
+              scene: meta.scene || "",
+              prompt: meta.prompt || "",
+              url: meta.url || "",
+              localUrl: "/videos/" + rel,
+              localFile: rel,
+              seconds: meta.seconds || "",
+              size: meta.size || "",
+              ratio: meta.ratio || "",
+              modeLabel: "",
+              createdAt: st.mtimeMs,
+              thumb: meta.thumb || null,
+              bytes: st.size,
+              fromDisk: true,
+            };
+          } else {
+            rec = {
+              id: "disk_" + suffix + "_" + (shotNo ?? 0),
+              videoId: "",
+              group: g.name,
+              shotNo: shotNo === 0 ? null : shotNo,
+              scene: "",
+              prompt: label || "",
+              url: "",
+              localUrl: "/videos/" + rel,
+              localFile: rel,
+              seconds: "",
+              size: "",
+              ratio: "",
+              modeLabel: "",
+              createdAt: st.mtimeMs,
+              thumb: null,
+              bytes: st.size,
+              fromDisk: true,
+            };
+          }
+          records.push(rec);
         } catch {}
       }
     }
