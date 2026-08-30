@@ -231,6 +231,8 @@ function renderStoryboard() {
   const proj = currentProject();
   if (!proj) return;
   sbSize.value = proj.size || "720P";
+  // 按当前模型禁用不支持的分辨率（如 flash 系列仅 720P），并在值被禁用时回退
+  if (typeof applySizeAvailability === "function") applySizeAvailability();
   sbAspect.value = proj.aspect_ratio || "9:16";
   sbList.innerHTML = "";
   if (!proj.shots.length) {

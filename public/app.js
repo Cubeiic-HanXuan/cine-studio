@@ -32,10 +32,10 @@ const MODES = {
   },
   multi: {
     key: "multi",
-    label: "多图视频",
+    label: "参考生成",
     apiMode: "reference",
     media: "multi",
-    hint: "上传多张参考图（角色 / 场景 / 风格），在提示词中用 <b>&lt;Picture N&gt;</b> 引用它们。",
+    hint: "上传参考素材（图片 / 音频 / 视频），在提示词中用 <b>&lt;Picture N&gt;</b>、<b>&lt;Audio N&gt;</b>、<b>&lt;Video N&gt;</b> 引用它们。",
   },
   keyframe: {
     key: "keyframe",
@@ -69,8 +69,9 @@ const EXAMPLES = {
   ],
   multi: [
     "以 <Picture 1> 中的角色和美术风格为参考，角色在花田中自然奔跑，保持外观一致，低机位跟拍",
-    "参考 <Picture 1> 的场景与 <Picture 2> 的主体，营造统一的视觉氛围，缓慢推镜",
-    "以 <Picture 1> 为视觉主体，融入 <Picture 2> 的背景，主体与场景自然融合，平稳运镜",
+    "以 <Picture 1> 为视觉主体，根据 <Audio 1> 的节奏设计动作和镜头切换，保持自然连贯",
+    "参考 <Video 1> 的主体动作和镜头节奏，将场景改为月光下的卧室，保持时序连贯",
+    "以 <Picture 1> 为角色参考，跟随 <Video 1> 的动作节奏，并配合 <Audio 1> 的配乐节拍",
   ],
   keyframe: [
     "从首帧姿态自然过渡到尾帧构图，镜头缓慢推进，运动平滑连贯，光线自然演变",
@@ -86,8 +87,13 @@ let currentMode = "text";
 let currentSize = "720P";
 let currentRatio = "16:9";
 let tasks = [];
-const media = { image: [], multi: [], kfFirst: null, kfLast: null };
+const media = { image: [], multi: [], audio: [], video: [], kfFirst: null, kfLast: null };
 let dropTarget = null;
+
+// flash 系列模型能力受限：仅 720P、不支持视频参考、参考图片最多 5 张
+function isFlashModel() {
+  return /flash/i.test(currentModel || "");
+}
 
 // ---------------------------------------------------------------------------
 // DOM
@@ -189,7 +195,7 @@ function setMode(key) {
   });
   const m = MODES[key];
   modeHint.innerHTML = m.hint;
-  mediaLabel.textContent = m.media === null ? "" : m.media === "image" ? "首帧图片" : m.media === "keyframe" ? "关键帧" : "参考图片";
+  mediaLabel.textContent = m.media === null ? "" : m.media === "image" ? "首帧图片" : m.media === "keyframe" ? "关键帧" : "参考素材";
   // 素材区在纯文本模式隐藏
   document.querySelector("#mediaZone").closest(".field").style.display = m.media === null ? "none" : "";
   renderMedia();
@@ -228,8 +234,43 @@ function renderRatios() {
 // ---------------------------------------------------------------------------
 // 分辨率与时长
 // ---------------------------------------------------------------------------
+// 不同模型支持的分辨率不同：agnes-video-2.5-flash 等 flash 系列仅支持 720P
+function allowedSizes(model) {
+  return /flash/i.test(model || "") ? ["720P"] : ["720P", "960P", "2K"];
+}
+
+// 按当前模型刷新所有分辨率选择控件（主表单 seg + 分镜脚本下拉）的可用状态
+function applySizeAvailability() {
+  const allowed = allowedSizes(currentModel);
+
+  // 主表单：禁用不支持的分辨率按钮；若当前选中项被禁用则回退到 720P
+  if (!allowed.includes(currentSize)) currentSize = allowed[0];
+  sizeSeg.querySelectorAll("button").forEach((b) => {
+    const ok = allowed.includes(b.dataset.size);
+    b.disabled = !ok;
+    b.classList.toggle("is-active", b.dataset.size === currentSize);
+  });
+
+  // 分镜脚本：同步禁用下拉选项；若当前值被禁用则回退到 720P 并触发持久化
+  const sbSizeEl = document.getElementById("sbSize");
+  if (sbSizeEl) {
+    [...sbSizeEl.options].forEach((o) => { o.disabled = !allowed.includes(o.value); });
+    if (!allowed.includes(sbSizeEl.value)) {
+      sbSizeEl.value = allowed[0];
+      sbSizeEl.dispatchEvent(new Event("change"));
+    }
+  }
+
+  // 模型能力影响参考素材区（flash 不支持视频参考）与引用角标，一并刷新
+  renderMedia();
+  renderChips();
+
+  updateCost();
+}
+
 sizeSeg.querySelectorAll("button").forEach((b) => {
   b.addEventListener("click", () => {
+    if (b.disabled) return;
     currentSize = b.dataset.size;
     sizeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("is-active", x === b));
     updateCost();
@@ -267,9 +308,21 @@ fileInput.addEventListener("change", async () => {
   for (const f of files) await addFile(target, f);
 });
 
+// 各上传目标对应的素材类型与文件选择器 accept
+const TARGET_KIND = { image: "image", multi: "image", kfFirst: "image", kfLast: "image", audio: "audio", video: "video" };
+const TARGET_ACCEPT = { image: "image/*", multi: "image/*", kfFirst: "image/*", kfLast: "image/*", audio: "audio/*", video: "video/*" };
+// 链接输入框占位提示
+const TARGET_URL_PH = {
+  image: "或粘贴公开图片链接（https://…）",
+  multi: "或粘贴公开图片链接（https://…）",
+  audio: "或粘贴公开音频链接（https://…）",
+  video: "或粘贴公开视频链接（https://…）",
+};
+
 function openPicker(target) {
   dropTarget = target;
-  fileInput.multiple = target === "multi";
+  fileInput.multiple = target === "multi" || target === "audio" || target === "video";
+  fileInput.accept = TARGET_ACCEPT[target] || "image/*";
   fileInput.value = "";
   fileInput.click();
 }
@@ -277,6 +330,7 @@ function openPicker(target) {
 const DROP_ICON = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 16V5m0 0L7.5 9.5M12 5l4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
 
 function makeDrop(target, title, sub) {
+  const kind = TARGET_KIND[target] || "image";
   const d = el("div", "drop");
   d.innerHTML = `${DROP_ICON}<span class="drop__title">${title}</span><span class="drop__sub">${esc(sub)}</span>`;
   d.addEventListener("click", () => openPicker(target));
@@ -285,26 +339,36 @@ function makeDrop(target, title, sub) {
   d.addEventListener("drop", (e) => {
     e.preventDefault();
     d.classList.remove("is-drag");
-    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
-    if (!files.length) { toast("请拖入图片文件", "err"); return; }
+    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith(kind + "/"));
+    if (!files.length) { toast("请拖入" + KIND_NOUN[kind] + "文件", "err"); return; }
     files.forEach((f) => addFile(target, f));
   });
   return d;
 }
 
 const KIND_LABEL = { image: "图", audio: "音", video: "视频" };
+const KIND_NOUN = { image: "图片", audio: "音频", video: "视频" };
 
-function makeThumb(item) {
+function makeThumb(item, refLabel) {
   const t = el("div", "thumb");
   const kind = item.kind || "image";
   t.classList.add("thumb--" + kind);
   if (item.status === "uploading") t.classList.add("is-uploading");
   if (item.status === "error") t.classList.add("is-error");
 
-  const img = el("img");
-  img.src = item.preview || item.url || "";
-  img.alt = item.name || "";
-  t.appendChild(img);
+  // 音频 / 视频没有可用的静态预览图，靠 ::after 图标遮罩展示，避免破图
+  if (kind === "image") {
+    const img = el("img");
+    img.src = item.preview || item.url || "";
+    img.alt = item.name || "";
+    t.appendChild(img);
+  }
+
+  if (refLabel) {
+    const idx = el("span", "thumb__idx");
+    idx.textContent = refLabel;
+    t.appendChild(idx);
+  }
 
   const kindTag = el("span", "thumb__kind");
   kindTag.textContent = KIND_LABEL[kind] || kind;
@@ -352,22 +416,129 @@ function renderMedia() {
     grid.append(s1, s2);
     mediaZone.appendChild(grid);
   } else if (m.media === "multi") {
-    if (media.multi.length) {
-      const list = el("div", "media-list");
-      media.multi.forEach((it) => list.appendChild(makeThumb(it)));
-      mediaZone.appendChild(list);
+    mediaZone.appendChild(makeThumbSection({
+      title: "参考图片",
+      hint: "提示词用 &lt;Picture N&gt; 引用" + (isFlashModel() ? " · flash 最多 5 张" : ""),
+      target: "multi",
+      items: media.multi,
+      refPrefix: "Picture",
+      dropTitle: "添加参考图",
+      dropSub: "可多张 · PNG / JPG",
+    }));
+    mediaZone.appendChild(makeThumbSection({
+      title: "参考音频",
+      hint: "提示词用 &lt;Audio N&gt; 引用",
+      target: "audio",
+      items: media.audio,
+      refPrefix: "Audio",
+      dropTitle: "添加参考音频",
+      dropSub: "可多个 · MP3 / WAV / M4A",
+    }));
+    if (isFlashModel()) {
+      const note = el("div", "media-flash-note");
+      note.textContent = "当前 flash 模型不支持视频参考，切换到标准模型 agnes-video-2.5 即可使用。";
+      mediaZone.appendChild(note);
+    } else {
+      mediaZone.appendChild(makeVideoSection());
     }
-    mediaZone.appendChild(makeDrop("multi", "添加参考图", "可多张，按顺序编号为 <Picture 1>、<Picture 2> …"));
-    mediaZone.appendChild(makeUrlRow("multi"));
   }
 }
 
+// 参考素材分区头（标题 + 引用提示）
+function makeRefHead(title, hint) {
+  const head = el("div", "ref-sec__head");
+  const t = el("span", "ref-sec__title");
+  t.textContent = title;
+  const h = el("span", "ref-sec__hint");
+  h.innerHTML = hint;
+  head.append(t, h);
+  return head;
+}
+
+// 图片 / 音频参考分区：缩略图网格 + 拖拽区 + 链接输入
+function makeThumbSection(opts) {
+  const sec = el("div", "ref-sec");
+  sec.appendChild(makeRefHead(opts.title, opts.hint));
+  if (opts.items.length) {
+    const list = el("div", "media-list");
+    opts.items.forEach((it, i) => list.appendChild(makeThumb(it, `<${opts.refPrefix} ${i + 1}>`)));
+    sec.appendChild(list);
+  }
+  sec.appendChild(makeDrop(opts.target, opts.dropTitle, opts.dropSub));
+  sec.appendChild(makeUrlRow(opts.target));
+  return sec;
+}
+
+// 视频参考分区：每段视频可单独设置起始秒与是否要求音轨
+function makeVideoSection() {
+  const sec = el("div", "ref-sec");
+  sec.appendChild(makeRefHead("参考视频", "提示词用 &lt;Video N&gt; 引用，可设置起始秒与是否需音轨"));
+  if (media.video.length) {
+    const list = el("div", "video-ref-list");
+    media.video.forEach((it, i) => list.appendChild(makeVideoRow(it, i)));
+    sec.appendChild(list);
+  }
+  sec.appendChild(makeDrop("video", "添加参考视频", "可多个 · MP4 / MOV / WebM"));
+  sec.appendChild(makeUrlRow("video"));
+  return sec;
+}
+
+function makeVideoRow(item, i) {
+  const row = el("div", "video-ref");
+  if (item.status === "uploading") row.classList.add("is-uploading");
+  if (item.status === "error") row.classList.add("is-error");
+
+  const badge = el("span", "video-ref__badge");
+  badge.textContent = `<Video ${i + 1}>`;
+  row.appendChild(badge);
+
+  const name = el("span", "video-ref__name");
+  name.textContent = item.status === "uploading" ? "上传中…" : item.status === "error" ? "上传失败" : (item.name || "参考视频");
+  name.title = item.error || item.name || "";
+  row.appendChild(name);
+
+  // 起始秒
+  const startField = el("label", "video-ref__field");
+  const startLabel = el("span", "video-ref__label");
+  startLabel.textContent = "起始(秒)";
+  const startInput = el("input", "video-ref__num");
+  startInput.type = "number";
+  startInput.min = "0";
+  startInput.step = "1";
+  startInput.value = String(item.start_seconds || 0);
+  startInput.disabled = item.status !== "ready";
+  startInput.addEventListener("change", () => { item.start_seconds = Math.max(0, Number(startInput.value) || 0); });
+  startField.append(startLabel, startInput);
+  row.appendChild(startField);
+
+  // 是否要求音轨
+  const audioField = el("label", "video-ref__check");
+  const audioInput = el("input");
+  audioInput.type = "checkbox";
+  audioInput.checked = !!item.require_audio;
+  audioInput.disabled = item.status !== "ready";
+  audioInput.addEventListener("change", () => { item.require_audio = audioInput.checked; });
+  const audioText = el("span");
+  audioText.textContent = "需音轨";
+  audioField.append(audioInput, audioText);
+  row.appendChild(audioField);
+
+  const x = el("button", "video-ref__x");
+  x.type = "button";
+  x.textContent = "✕";
+  x.title = "移除";
+  x.addEventListener("click", () => removeItem(item));
+  row.appendChild(x);
+  return row;
+}
+
 function makeUrlRow(target) {
+  const kind = TARGET_KIND[target] || "image";
   const row = el("div", "url-row");
   const input = el("input");
   input.type = "url";
-  input.placeholder = "或粘贴公开图片链接（https://…）";
-  input.setAttribute("aria-label", "粘贴图片链接");
+  input.placeholder = TARGET_URL_PH[target] || TARGET_URL_PH.image;
+  input.setAttribute("aria-label", "粘贴" + KIND_NOUN[kind] + "链接");
   const add = el("button", "tool-btn");
   add.type = "button";
   add.textContent = "添加";
@@ -376,20 +547,24 @@ function makeUrlRow(target) {
     if (!/^https?:\/\//.test(u)) { toast("请输入以 http(s):// 开头的链接", "err"); return; }
     const item = {
       id: uid(),
-      name: u.split("/").pop() || "图片",
-      type: "image/*",
-      kind: "image",
+      name: u.split("/").pop() || KIND_NOUN[kind],
+      type: kind + "/*",
+      kind,
       url: u,
-      preview: u,
+      preview: kind === "image" ? u : null,
       status: "ready",
       error: null,
+      start_seconds: 0,
+      require_audio: false,
     };
     if (target === "image") media.image = [item];
     else if (target === "multi") media.multi.push(item);
+    else if (target === "audio") media.audio.push(item);
+    else if (target === "video") media.video.push(item);
     input.value = "";
     renderMedia();
     renderChips();
-    toast("已添加图片链接", "ok", 2000);
+    toast("已添加" + KIND_NOUN[kind] + "链接", "ok", 2000);
   };
   add.addEventListener("click", doAdd);
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
@@ -397,35 +572,44 @@ function makeUrlRow(target) {
   return row;
 }
 
+function addChip(label, name) {
+  const c = el("button", "chip");
+  c.type = "button";
+  c.textContent = label;
+  c.title = name || "";
+  c.addEventListener("click", () => insertAtCursor(label));
+  chipsEl.appendChild(c);
+}
+
 function renderChips() {
   chipsEl.innerHTML = "";
   if (currentMode !== "multi") return;
-  media.multi.forEach((it, i) => {
-    const c = el("button", "chip");
-    c.type = "button";
-    c.textContent = `<Picture ${i + 1}>`;
-    c.title = it.name || "";
-    c.addEventListener("click", () => insertAtCursor(`<Picture ${i + 1}>`));
-    chipsEl.appendChild(c);
-  });
+  media.multi.forEach((it, i) => addChip(`<Picture ${i + 1}>`, it.name));
+  media.audio.forEach((it, i) => addChip(`<Audio ${i + 1}>`, it.name));
+  if (!isFlashModel()) media.video.forEach((it, i) => addChip(`<Video ${i + 1}>`, it.name));
 }
 
 async function addFile(target, file) {
+  const kind = TARGET_KIND[target] || "image";
   const item = {
     id: uid(),
     name: file.name,
     type: file.type,
-    kind: "image",
+    kind,
     url: null,
-    preview: URL.createObjectURL(file),
+    preview: kind === "image" ? URL.createObjectURL(file) : null, // 音频/视频无静态预览图
     status: "uploading",
     error: null,
+    start_seconds: 0,
+    require_audio: false,
   };
 
   if (target === "image") media.image = [item];
   else if (target === "kfFirst") media.kfFirst = item;
   else if (target === "kfLast") media.kfLast = item;
   else if (target === "multi") media.multi.push(item);
+  else if (target === "audio") media.audio.push(item);
+  else if (target === "video") media.video.push(item);
 
   renderMedia();
   renderChips();
@@ -437,7 +621,7 @@ async function addFile(target, file) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "上传失败");
     item.url = data.url;
-    item.localUrl = data.localUrl || null; // 参考图本地落盘地址（图床过期也不丢）
+    item.localUrl = data.localUrl || null; // 素材本地落盘地址（图床过期也不丢）
     item.status = "ready";
   } catch (err) {
     item.status = "error";
@@ -450,6 +634,8 @@ async function addFile(target, file) {
 function removeItem(item) {
   media.image = media.image.filter((x) => x !== item);
   media.multi = media.multi.filter((x) => x !== item);
+  media.audio = media.audio.filter((x) => x !== item);
+  media.video = media.video.filter((x) => x !== item);
   if (media.kfFirst === item) media.kfFirst = null;
   if (media.kfLast === item) media.kfLast = null;
   renderMedia();
@@ -810,7 +996,7 @@ function collectRequest() {
   if (seedEl.value && seedEl.value.trim() !== "") body.seed = Number(seedEl.value);
 
   // 校验并附加媒体
-  const pending = [...media.image, ...media.multi, media.kfFirst, media.kfLast].filter(
+  const pending = [...media.image, ...media.multi, ...media.audio, ...media.video, media.kfFirst, media.kfLast].filter(
     (x) => x && x.status === "uploading"
   );
   if (pending.length) return { error: "素材仍在上传中，请稍候" };
@@ -827,9 +1013,26 @@ function collectRequest() {
     if (media.kfFirst) body.first_frame = media.kfFirst.url;
     if (media.kfLast) body.last_frame = media.kfLast.url;
   } else if (m.media === "multi") {
-    if (!media.multi.length) return { error: "请至少上传一张参考图" };
-    if (media.multi.some((x) => x.status === "error")) return { error: "存在上传失败的参考图，请移除后重试" };
-    body.images = media.multi.map((x) => x.url);
+    // reference 模式：图片 / 音频 / 视频三类参考素材，至少一类非空
+    const all = [...media.multi, ...media.audio, ...media.video];
+    if (all.some((x) => x.status === "error")) return { error: "存在上传失败的素材，请移除后重试" };
+    if (isFlashModel() && media.video.length)
+      return { error: "当前 flash 模型不支持视频参考，请移除视频或切换为标准模型" };
+    if (isFlashModel() && media.multi.length > 5)
+      return { error: "flash 模型参考图片最多 5 张，请移除多余的图片" };
+
+    const imgs = media.multi.map((x) => x.url);
+    const auds = media.audio.map((x) => x.url);
+    const vids = media.video.map((x) => ({
+      url: x.url,
+      start_seconds: Math.max(0, Number(x.start_seconds) || 0),
+      require_audio: !!x.require_audio,
+    }));
+    if (!imgs.length && !auds.length && !vids.length)
+      return { error: "请至少添加一类参考素材（图片 / 音频 / 视频）" };
+    if (imgs.length) body.images = imgs;
+    if (auds.length) body.audios = auds;
+    if (vids.length) body.videos = vids;
   }
   return { body };
 }
@@ -1151,6 +1354,7 @@ async function switchModel(m) {
       body: JSON.stringify({ model: m }),
     });
     if (!res.ok) throw new Error();
+    applySizeAvailability(); // 切换模型后刷新分辨率可用状态
     toast("模型已切换为 " + m, "ok", 2400);
   } catch {
     currentModel = prev;
@@ -1185,6 +1389,7 @@ async function loadSettings() {
     videoDirInput.value = data.videoDir || "";
     currentModel = data.model || DEFAULT_MODEL;
     modelNameEl.textContent = currentModel;
+    applySizeAvailability(); // 按持久化的模型初始化分辨率可用状态
     apiKeyInput.placeholder = data.configured
       ? "已配置 " + data.apiKeyMasked + "（留空保持不变）"
       : "sk-…";
