@@ -15,7 +15,10 @@ const SHOT_MODES = [
   { value: "text", label: "文生视频" },
   { value: "image", label: "图生视频" },
 ];
-const SECONDS_OPTIONS = ["4", "5", "6", "8", "10", "12"];
+// Agnes Video 2.5 / 2.5-flash 的 seconds 是字符串 "4"–"12"（整数，默认 "5"）。
+// 单镜视图的滑块本来就是 min=4 max=12 step=1，这里以前少了 7/9/11，
+// 导致合并后凑出 7s 的镜头被迫上抬到 8s 白烧一秒。
+const SECONDS_OPTIONS = ["4", "5", "6", "7", "8", "9", "10", "11", "12"];
 
 let projects = [];
 let currentProjectId = null;

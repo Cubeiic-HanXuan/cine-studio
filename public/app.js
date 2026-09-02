@@ -15,12 +15,17 @@ const POLL_MS = 1500;
 
 const PRICE = { "720P": 0.15, "960P": 0.25, "2K": 0.35 };
 
+// Agnes Video 2.5 只有三个 API mode：text / keyframe / reference，没有独立的图生视频模式。
+// 所以界面上的「图生视频」和「关键帧动画」都发 mode:"keyframe"，只是带的媒体字段不同。
+// slots 声明每个模式真正会读取、并发送出去的素材槽位 —— media 是全局的，
+// 切模式后残留的素材必须靠这份映射排除掉，否则会污染缩略图和「上传中」检查。
 const MODES = {
   text: {
     key: "text",
     label: "文生视频",
     apiMode: "text",
     media: null,
+    slots: [],
     hint: "用文字描述主体、动作、镜头与风格，无需任何素材。",
   },
   image: {
@@ -28,13 +33,15 @@ const MODES = {
     label: "图生视频",
     apiMode: "keyframe",
     media: "image",
-    hint: "上传一张图片作为视频的<b>真实首帧</b>，描述从该画面开始的运动与运镜。",
+    slots: ["image"],
+    hint: "上传一张图片作为视频的<b>真实首帧</b>，描述从该画面开始的运动与运镜。Agnes 2.5 没有单独的图生视频模式，这里发的是 <b>keyframe</b> 且只带 <b>first_frame</b>。",
   },
   multi: {
     key: "multi",
     label: "参考生成",
     apiMode: "reference",
     media: "multi",
+    slots: ["multi", "audio", "video"],
     hint: "上传参考素材（图片 / 音频 / 视频），在提示词中用 <b>&lt;Picture N&gt;</b>、<b>&lt;Audio N&gt;</b>、<b>&lt;Video N&gt;</b> 引用它们。",
   },
   keyframe: {
@@ -42,6 +49,7 @@ const MODES = {
     label: "关键帧动画",
     apiMode: "keyframe",
     media: "keyframe",
+    slots: ["kfFirst", "kfLast"],
     hint: "上传<b>首帧</b>与<b>尾帧</b>，视频将在这两个关键帧之间平滑过渡（至少一张）。",
   },
 };
@@ -90,6 +98,15 @@ let tasks = [];
 const media = { image: [], multi: [], audio: [], video: [], kfFirst: null, kfLast: null };
 let dropTarget = null;
 
+// 当前模式真正会用到的素材。切模式不清空 media（切回来还能用），
+// 所以凡是「这次请求涉及哪些素材」的判断都必须走这里，不能直接遍历 media 全部槽位。
+function activeMedia(mode = currentMode) {
+  return (MODES[mode].slots || []).flatMap((k) => {
+    const v = media[k];
+    return Array.isArray(v) ? v : v ? [v] : [];
+  });
+}
+
 // flash 系列模型能力受限：仅 720P、不支持视频参考、参考图片最多 5 张
 function isFlashModel() {
   return /flash/i.test(currentModel || "");
@@ -102,6 +119,7 @@ const $ = (sel) => document.querySelector(sel);
 const promptEl = $("#prompt");
 const promptCount = $("#promptCount");
 const modeHint = $("#modeHint");
+const reqPeek = $("#reqPeek");
 const mediaZone = $("#mediaZone");
 const mediaLabel = $("#mediaLabel");
 const chipsEl = $("#chips");
@@ -292,6 +310,51 @@ function updateCost() {
 }
 
 // ---------------------------------------------------------------------------
+// 请求字段预览
+// ---------------------------------------------------------------------------
+// 文档把媒体字段和 mode 绑死：first_frame / last_frame 只属于 keyframe，
+// images / audios / videos 只属于 reference，text 带任何一个都会 400。
+// 而界面上「图生视频」「关键帧动画」都发 mode:"keyframe"，光看按钮分不出发的是哪些字段，
+// 所以直接把结果写在界面上，不必开 devtools 才能确认。
+function mediaFields(mode = currentMode) {
+  const f = [];
+  if (mode === "image") {
+    f.push(media.image[0] ? "first_frame" : "first_frame（待上传）");
+  } else if (mode === "keyframe") {
+    if (media.kfFirst) f.push("first_frame");
+    if (media.kfLast) f.push("last_frame");
+    if (!f.length) f.push("first_frame / last_frame（至少一张，待上传）");
+  } else if (mode === "multi") {
+    if (media.multi.length) f.push(`images×${media.multi.length}`);
+    if (media.audio.length) f.push(`audios×${media.audio.length}`);
+    if (media.video.length && !isFlashModel()) f.push(`videos×${media.video.length}`);
+    if (!f.length) f.push("images / audios / videos（至少一类，待添加）");
+  }
+  return f;
+}
+
+function renderReqPeek() {
+  if (!reqPeek) return;
+  const f = mediaFields();
+  reqPeek.innerHTML =
+    `将发送 <b>mode: "${MODES[currentMode].apiMode}"</b>` +
+    (f.length ? ` · <b>${f.join("</b> + <b>")}</b>` : " · 不带任何媒体字段");
+}
+
+// 已创建任务的实际请求体摘要 —— 直接读 task.request（真正发出去的那份），
+// 不重新推导，历史任务也能核对。
+function requestSummary(req) {
+  if (!req || !req.mode) return "";
+  const f = [];
+  if (req.first_frame) f.push("first_frame");
+  if (req.last_frame) f.push("last_frame");
+  if (req.images?.length) f.push(`images×${req.images.length}`);
+  if (req.audios?.length) f.push(`audios×${req.audios.length}`);
+  if (req.videos?.length) f.push(`videos×${req.videos.length}`);
+  return `mode: "${req.mode}"` + (f.length ? " · " + f.join(" + ") : "");
+}
+
+// ---------------------------------------------------------------------------
 // 媒体上传
 // ---------------------------------------------------------------------------
 const fileInput = document.createElement("input");
@@ -396,6 +459,7 @@ function makeThumb(item, refLabel) {
 }
 
 function renderMedia() {
+  renderReqPeek(); // 素材一变，实际发出的媒体字段就变，跟着刷新
   const m = MODES[currentMode];
   mediaZone.innerHTML = "";
   if (!m.media) return;
@@ -786,6 +850,11 @@ function makeTaskCard(task) {
   const modeTag = el("div", "task__mode");
   modeTag.textContent = `${task.modeLabel} · ${task.seconds} 秒 · ${task.size} · ${task.ratio}`;
 
+  // 实际请求体摘要：早期任务没存 request，取不到就不显示
+  const apiTag = el("div", "task__api");
+  apiTag.textContent = requestSummary(task.request);
+  apiTag.hidden = !apiTag.textContent;
+
   // 提示词：默认收缩 2 行，点「展开」显示全文并可复制
   const promptBox = el("div", "task__prompt-box");
   const promptLine = el("div", "task__prompt is-collapsed");
@@ -820,7 +889,7 @@ function makeTaskCard(task) {
 
   promptTools.append(toggleBtn, copyBtn);
   promptBox.append(promptLine, promptTools);
-  meta.append(modeTag, promptBox);
+  meta.append(modeTag, apiTag, promptBox);
   top.append(thumb, meta);
   card.appendChild(top);
 
@@ -995,10 +1064,8 @@ function collectRequest() {
   };
   if (seedEl.value && seedEl.value.trim() !== "") body.seed = Number(seedEl.value);
 
-  // 校验并附加媒体
-  const pending = [...media.image, ...media.multi, ...media.audio, ...media.video, media.kfFirst, media.kfLast].filter(
-    (x) => x && x.status === "uploading"
-  );
+  // 校验并附加媒体（只看当前模式的槽位：文生视频不该被别的模式里卡住的上传挡下）
+  const pending = activeMedia().filter((x) => x && x.status === "uploading");
   if (pending.length) return { error: "素材仍在上传中，请稍候" };
 
   if (m.media === "image") {
@@ -1037,8 +1104,10 @@ function collectRequest() {
   return { body };
 }
 
+// 缩略图只能取本次请求真正发出去的素材。以前是 media.image[0] || kfFirst || ... 有啥拿啥，
+// 结果「图生视频传过图 → 切回文生视频生成」的任务会挂着一张根本没发送的图，看着像图被发了。
 function firstThumb() {
-  const it = media.image[0] || media.kfFirst || media.kfLast || media.multi[0];
+  const it = activeMedia()[0];
   return it ? it.localUrl || it.url || it.preview : null;
 }
 

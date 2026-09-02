@@ -330,6 +330,13 @@ code { font-family: var(--font-mono); font-size: 0.86em; }
 }
 .mode-hint b { color: var(--muted); font-weight: 500; }
 
+/* 实际发出的 mode 与媒体字段：等宽，和文档里的字段名一一对应 */
+.req-peek {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--dim);
+  letter-spacing: 0.04em; margin-top: 6px; min-height: 1.2em;
+}
+.req-peek b { color: var(--cyan); font-weight: 500; }
+
 /* --------------------------------------------------------------------------
    表单字段
    -------------------------------------------------------------------------- */
@@ -613,6 +620,11 @@ input[type="range"]::-moz-range-thumb {
 .task__thumb svg { width: 22px; height: 22px; }
 .task__meta { flex: 1; min-width: 0; }
 .task__mode { font-family: var(--font-mono); font-size: 10px; color: var(--cyan); letter-spacing: 0.05em; }
+/* 该任务实际发出的 mode 与媒体字段，用于事后核对 */
+.task__api {
+  font-family: var(--font-mono); font-size: 10px; color: var(--dim);
+  letter-spacing: 0.04em; margin-top: 2px;
+}
 .task__prompt-box { margin-top: 3px; }
 .task__prompt {
   font-size: 12.5px; color: var(--muted); line-height: 1.55;
