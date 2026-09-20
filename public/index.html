@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CineStudio · 视频生成</title>
-  <meta name="description" content="CineStudio · 多厂商视频生成工作台：文生视频、图生视频、多图视频、关键帧动画、分镜脚本。" />
+  <title>CineStudio · 视频 & 图片生成</title>
+  <meta name="description" content="CineStudio · 多厂商视频/图片生成工作台：文生视频、图生视频、多图视频、关键帧动画、分镜脚本、文生图、图生图。" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -31,7 +31,7 @@
         </div>
         <div class="brand__text">
           <span class="brand__name">Cine<em>Studio</em></span>
-          <span class="brand__sub">视频生成工作台</span>
+          <span class="brand__sub">视频 · 图片生成工作台</span>
         </div>
       </div>
 
@@ -57,6 +57,7 @@
     <!-- 视图切换 -->
     <nav class="views reveal" role="tablist" aria-label="视图切换">
       <button class="view-tab is-active" data-view="single" role="tab" aria-selected="true">单镜生成</button>
+      <button class="view-tab" data-view="images" role="tab" aria-selected="false">图片生成</button>
       <button class="view-tab" data-view="storyboard" role="tab" aria-selected="false">分镜脚本</button>
       <button class="view-tab" data-view="videos" role="tab" aria-selected="false">已生成视频</button>
     </nav>
@@ -189,6 +190,105 @@
       </section>
     </main>
 
+    <!-- ============================== 图片生成 ============================== -->
+    <main class="stage" id="imagesView" hidden>
+      <!-- ---------- 左：创作台 ---------- -->
+      <section class="composer reveal reveal--1">
+        <!-- 模式切换 -->
+        <div class="modes" role="tablist" aria-label="图片生成模式">
+          <button class="mode img-mode is-active" data-img-mode="text" role="tab" aria-selected="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <span>文生图</span>
+            <small>text</small>
+          </button>
+          <button class="mode img-mode" data-img-mode="image" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="M4.5 17l4.5-4.5 3.2 3.2 2.3-2.3 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>图生图</span>
+            <small>img2img</small>
+          </button>
+        </div>
+
+        <!-- 模式说明 -->
+        <p class="mode-hint" id="imgModeHint"></p>
+
+        <!-- 提示词 -->
+        <div class="field">
+          <label class="field__label" for="imgPrompt">
+            画面描述
+            <span class="field__count"><b id="imgPromptCount">0</b></span>
+          </label>
+          <div class="prompt-wrap">
+            <textarea id="imgPrompt" rows="5" spellcheck="false"
+              placeholder="主体 · 场景/背景 · 风格 · 光照 · 构图 · 质量要求"></textarea>
+            <div class="prompt-tools">
+              <div class="chips"></div>
+              <button class="tool-btn" id="imgDiceBtn" type="button" title="随机示例">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="4" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="9" r="1.3" fill="currentColor"/><circle cx="15" cy="9" r="1.3" fill="currentColor"/><circle cx="9" cy="15" r="1.3" fill="currentColor"/><circle cx="15" cy="15" r="1.3" fill="currentColor"/></svg>
+                灵感
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 参考图上传区（图生图模式显示） -->
+        <div class="field" id="imgRefField" style="display:none">
+          <label class="field__label">参考图</label>
+          <div class="media-zone" id="imgRefZone">
+            <!-- 由 images.js 渲染 -->
+          </div>
+        </div>
+
+        <!-- 参数区 -->
+        <div class="params">
+          <div class="param">
+            <label class="field__label">尺寸</label>
+            <div class="seg" id="imgSizeSeg" role="radiogroup">
+              <button data-img-size="1024x1024" class="is-active"><b>方形</b><small>1024×1024</small></button>
+              <button data-img-size="1024x768"><b>横版</b><small>1024×768</small></button>
+              <button data-img-size="768x1024"><b>竖版</b><small>768×1024</small></button>
+            </div>
+          </div>
+
+          <div class="param">
+            <label class="field__label" for="imgModel">模型</label>
+            <select id="imgModel" class="sb-select">
+              <option value="agnes-image-2.5-flash">agnes-image-2.5-flash</option>
+              <option value="agnes-image-2.1-flash">agnes-image-2.1-flash</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 生成按钮 -->
+        <div class="actions">
+          <div class="cost">图片生成当前限免 · 同步接口约需几秒到几十秒</div>
+          <button class="btn btn--primary" id="imgGenerateBtn" type="button">
+            <span class="btn__idle">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M8 5.5v13l10-6.5-10-6.5Z" fill="currentColor"/></svg>
+              开始生成
+            </span>
+            <span class="btn__busy">正在生成…</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ---------- 右：队列与结果 ---------- -->
+      <section class="results reveal reveal--2">
+        <header class="results__head">
+          <h2>生成记录</h2>
+          <button class="link-btn" id="imgClearDoneBtn" type="button">清除已完成</button>
+        </header>
+        <div class="results__list" id="imgTaskList">
+          <div class="empty" id="imgEmptyState">
+            <div class="empty__film" aria-hidden="true">
+              <svg viewBox="0 0 64 64" fill="none"><rect x="10" y="18" width="44" height="28" rx="4" stroke="currentColor" stroke-width="1.6"/><circle cx="25" cy="31" r="3" fill="currentColor"/><path d="M14 42l10-9 6 5 8-7 12 11" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            </div>
+            <p class="empty__title">还没有生成记录</p>
+            <p class="empty__sub">在左侧输入描述或上传参考图，点击「开始生成」</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <!-- ============================== 分镜脚本 ============================== -->
     <section class="storyboard" id="storyboardView" hidden>
       <div class="sb-toolbar reveal">
@@ -259,7 +359,7 @@
     </section>
 
     <footer class="footer reveal">
-      <span>CineStudio · 多厂商视频生成工作台</span>
+      <span>CineStudio · 多厂商视频 & 图片生成工作台</span>
       <span>任务与结果持久化保存在本机服务器</span>
     </footer>
   </div>

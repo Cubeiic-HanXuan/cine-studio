@@ -25,6 +25,8 @@ const ASSETS_DIR = path.join(DATA_DIR, "assets");
 
 const DEFAULT_BASE_URL = "https://api.agnes-ai.cn/v1";
 const DEFAULT_MODEL = "agnes-video-2.5";
+// 图片生成默认模型（文档：https://www.agnes-ai.cn/zh-Hans/docs/agnes-image-20-flash）
+const DEFAULT_IMAGE_MODEL = "agnes-image-2.5-flash";
 
 // ---------------------------------------------------------------------------
 // 配置读写（API Key 只保存在服务器本地，不进入前端代码）
@@ -48,7 +50,7 @@ function writeConfig(cfg) {
 // 浏览器只做展示缓存，真正的持久化在服务端磁盘。
 // ---------------------------------------------------------------------------
 function emptyStore() {
-  return { tasks: [], projects: [], library: [] };
+  return { tasks: [], projects: [], library: [], images: [] };
 }
 
 function readStore() {
@@ -98,6 +100,11 @@ function getVideoDir() {
   return process.env.VIDEO_DIR || readConfig().videoDir || path.join(__dirname, "videos");
 }
 
+// 图片本地存储目录：默认项目内 images/，可用环境变量 IMAGE_DIR 覆盖
+function getImageDir() {
+  return process.env.IMAGE_DIR || readConfig().imageDir || path.join(__dirname, "images");
+}
+
 // ---------------------------------------------------------------------------
 // Express 应用
 // ---------------------------------------------------------------------------
@@ -108,6 +115,11 @@ app.use(express.static(path.join(__dirname, "public")));
 // 本地视频库：把存储目录以 /videos 暴露给浏览器播放/预览
 app.use("/videos", (req, res, next) => {
   express.static(getVideoDir())(req, res, next);
+});
+
+// 生成的图片落盘目录，以 /images 暴露给浏览器预览/下载
+app.use("/images", (req, res, next) => {
+  express.static(getImageDir())(req, res, next);
 });
 
 // 参考图本地库：上传时落盘到 data/assets/，以 /assets 暴露（图床过期也不丢）
@@ -297,7 +309,7 @@ app.get("/api/state", (_req, res) => {
 app.post("/api/state", (req, res) => {
   const body = req.body || {};
   const store = readStore();
-  for (const key of ["tasks", "projects", "library"]) {
+  for (const key of ["tasks", "projects", "library", "images"]) {
     if (Array.isArray(body[key])) store[key] = body[key];
   }
   try {
@@ -410,6 +422,118 @@ app.get("/api/status", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// 图片生成（代理，同步接口）
+//   Agnes 图片接口与视频不同：POST /v1/images/generations 同步返回结果，
+//   没有任务 id、无需轮询。文档要求 response_format 与参考图 image 数组
+//   必须放在 extra_body 内（放顶层会报错），这个坑封装在服务端，
+//   前端只发扁平的 { prompt, size, model?, images? }。
+// ---------------------------------------------------------------------------
+app.post("/api/images", async (req, res) => {
+  const key = getApiKey();
+  if (!key) {
+    return res.status(401).json({ error: "尚未配置 API Key，请先点击右上角「设置」填入。" });
+  }
+
+  const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+  if (!prompt) {
+    return res.status(400).json({ error: "缺少 prompt" });
+  }
+  const size = typeof req.body?.size === "string" && req.body.size.trim() ? req.body.size.trim() : "1024x1024";
+  const requested = typeof req.body?.model === "string" ? req.body.model.trim() : "";
+  const images = Array.isArray(req.body?.images)
+    ? req.body.images.filter((u) => typeof u === "string" && /^(https?:\/\/|data:image\/)/.test(u))
+    : [];
+
+  const body = {
+    model: requested || DEFAULT_IMAGE_MODEL,
+    prompt,
+    size,
+    extra_body: {
+      response_format: "url",
+      ...(images.length ? { image: images } : {}),
+    },
+  };
+
+  const url = `${getBaseUrl()}/images/generations`;
+  try {
+    // 同步接口，生成可能耗时数秒到数十秒：放宽上游响应超时（文档建议 60s-360s）
+    const upstream = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(300_000),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({
+        error: data?.error?.message || data?.message || `生成失败（HTTP ${upstream.status}）`,
+        detail: data,
+      });
+    }
+    res.json(data);
+  } catch (err) {
+    console.error("[images]", err);
+    res.status(502).json({ error: "无法连接 Agnes API：" + err.message });
+  }
+});
+
+// 生成的图片落盘到本地 images/ 目录（远程 URL 会过期，本地文件才能永久保留）
+function guessImageExt(url) {
+  try {
+    const p = new URL(url).pathname;
+    const ext = (p.split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "." + ext;
+  } catch {}
+  return ".png";
+}
+
+app.post("/api/images/archive", async (req, res) => {
+  const url = typeof req.body?.url === "string" ? req.body.url : "";
+  if (!/^https?:\/\//.test(url)) {
+    return res.status(400).json({ error: "缺少有效的图片 url" });
+  }
+  // 与 /api/download 一致的 SSRF 防护：仅允许公网地址
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return res.status(400).json({ error: "无效 URL" });
+  }
+  if (isPrivateHost(parsed.hostname)) {
+    return res.status(400).json({ error: "仅支持公网 http(s) 地址" });
+  }
+
+  try {
+    const upstream = await fetch(url, {
+      headers: { "User-Agent": UA, Accept: "image/*,*/*" },
+      redirect: "follow",
+    });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({ error: `下载失败（HTTP ${upstream.status}）` });
+    }
+    const baseDir = getImageDir();
+    fs.mkdirSync(baseDir, { recursive: true });
+    const suffix = String(req.body?.id || "").replace(/[^a-zA-Z0-9]/g, "").slice(-6) || Date.now().toString(36);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const filename = `${stamp}_${suffix}${guessImageExt(url)}`;
+    const filePath = path.join(baseDir, filename);
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(filePath);
+      Readable.fromWeb(upstream.body).pipe(out);
+      out.on("finish", resolve);
+      out.on("error", reject);
+    });
+    res.json({ ok: true, localUrl: "/images/" + filename, file: filename });
+  } catch (err) {
+    console.error("[images archive]", err);
+    res.status(502).json({ error: "落盘失败：" + err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 下载视频（代理流式转发，避免跨域下载被浏览器拦截；仅允许公网地址）
 // ---------------------------------------------------------------------------
 function isPrivateHost(hostname) {
@@ -444,7 +568,7 @@ app.get("/api/download", async (req, res) => {
       return res.status(502).json({ error: `下载失败（HTTP ${upstream.status}）` });
     }
     const ext = (parsed.pathname.split(".").pop() || "mp4").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "mp4";
-    const filename = `agnes-video.${ext}`;
+    const filename = (req.query.kind === "image" ? "agnes-image" : "agnes-video") + `.${ext}`;
     res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/octet-stream");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"; filename*=UTF-8''${filename}`);
     const len = upstream.headers.get("content-length");

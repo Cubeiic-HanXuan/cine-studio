@@ -302,6 +302,8 @@ code { font-family: var(--font-mono); font-size: 0.86em; }
    模式切换
    -------------------------------------------------------------------------- */
 .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+/* 图片生成只有两个模式，同样复用 .mode 样式 */
+#imagesView .modes { grid-template-columns: repeat(2, 1fr); }
 .mode {
   display: flex; flex-direction: column; align-items: flex-start; gap: 7px;
   padding: 13px 14px; border-radius: var(--radius-sm);
@@ -354,11 +356,11 @@ code { font-family: var(--font-mono); font-size: 0.86em; }
   transition: border-color 0.2s, box-shadow 0.2s; overflow: hidden;
 }
 .prompt-wrap:focus-within { border-color: rgba(139, 92, 246, 0.5); box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.14); }
-#prompt {
+#prompt, #imgPrompt {
   width: 100%; resize: vertical; min-height: 104px; background: transparent;
   border: none; outline: none; padding: 14px 15px 8px; font-size: 14px; line-height: 1.6;
 }
-#prompt::placeholder { color: var(--dim); }
+#prompt::placeholder, #imgPrompt::placeholder { color: var(--dim); }
 .prompt-tools {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 6px 8px 8px 12px; border-top: 1px dashed var(--line);
@@ -670,6 +672,18 @@ input[type="range"]::-moz-range-thumb {
   animation: shimmer 1.6s linear infinite;
 }
 @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+/* 同步接口没有进度百分比：用往返移动的色条表示「生成中」 */
+.progress__bar--indeterminate { width: 40%; animation: indeterminate 1.4s ease-in-out infinite; }
+@keyframes indeterminate {
+  0% { transform: translateX(-30%); }
+  50% { transform: translateX(180%); }
+  100% { transform: translateX(-30%); }
+}
+
+/* 图片生成结果预览（复用 .task__video-wrap 的布局语义） */
+.task__img-wrap { position: relative; }
+.task__img-wrap img { width: 100%; border-radius: 10px; display: block; object-fit: contain; background: var(--surface-2); }
 
 .task video { width: 100%; border-radius: 10px; background: #000; display: block; }
 .task__video-wrap { position: relative; }

@@ -200,13 +200,14 @@ $("#diceBtn").addEventListener("click", rollExample);
 // ---------------------------------------------------------------------------
 // 模式切换
 // ---------------------------------------------------------------------------
-document.querySelectorAll(".mode").forEach((btn) => {
+// 注意：#imagesView 的图片模式按钮也带 .mode 类（复用样式），必须限定在 #singleView 内查询
+document.querySelectorAll("#singleView .mode").forEach((btn) => {
   btn.addEventListener("click", () => setMode(btn.dataset.mode));
 });
 
 function setMode(key) {
   currentMode = key;
-  document.querySelectorAll(".mode").forEach((b) => {
+  document.querySelectorAll("#singleView .mode").forEach((b) => {
     const active = b.dataset.mode === key;
     b.classList.toggle("is-active", active);
     b.setAttribute("aria-selected", String(active));

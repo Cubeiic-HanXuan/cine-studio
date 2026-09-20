@@ -889,9 +889,12 @@ document.querySelectorAll(".view-tab").forEach((tab) => {
     const view = tab.dataset.view;
     singleView.hidden = view !== "single";
     sbView.hidden = view !== "storyboard";
+    const iv = document.getElementById("imagesView");
+    if (iv) iv.hidden = view !== "images";
     const vv = document.getElementById("videosView");
     if (vv) vv.hidden = view !== "videos";
     if (view === "storyboard") renderStoryboard();
+    if (view === "images" && typeof renderImages === "function") renderImages();
     if (view === "videos" && typeof renderVideos === "function") renderVideos();
   });
 });

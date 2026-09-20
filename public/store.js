@@ -15,6 +15,7 @@
     tasks: "agnes.studio.tasks.v1",
     projects: "agnes.studio.projects.v1",
     library: "agnes.studio.library.v1",
+    images: "agnes.studio.images.v1",
   };
 
   function readLocal(key) {
@@ -61,8 +62,9 @@
         tasks: readLocal("tasks"),
         projects: readLocal("projects"),
         library: readLocal("library"),
+        images: readLocal("images"),
       };
-      if (local.tasks.length || local.projects.length || local.library.length) {
+      if (local.tasks.length || local.projects.length || local.library.length || local.images.length) {
         await postState(local);
         state = { ...state, ...local };
       }
@@ -72,6 +74,7 @@
     writeLocal("tasks", state.tasks);
     writeLocal("projects", state.projects);
     writeLocal("library", state.library);
+    writeLocal("images", state.images);
   }
 
   // 防抖持久化：把指定集合的最新值（从 localStorage 读）同步到服务端
@@ -103,7 +106,7 @@
     } catch (err) {
       console.warn("[store] 初始化失败：", err.message);
     }
-    for (const src of ["app.js", "storyboard.js", "videos.js"]) {
+    for (const src of ["app.js", "images.js", "storyboard.js", "videos.js"]) {
       try {
         await loadScript(src);
       } catch (err) {

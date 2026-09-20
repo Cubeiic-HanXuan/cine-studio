@@ -62,6 +62,7 @@ npm start
 ```bash
 AGNES_API_KEY="sk-…" npm start
 # 可选：AGNES_BASE_URL（默认 https://api.agnes-ai.cn/v1）
+# 可选：IMAGE_DIR（生成图片的本地落盘目录，默认项目内 images/）
 ```
 
 ## 使用步骤
